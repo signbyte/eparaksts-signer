@@ -36,8 +36,8 @@ github.com/gabriel-vasile/mimetype v1.4.15 h1:05iP/CYtZ/w455R/KZM6rZ5ieAdh99UPtd
 github.com/gabriel-vasile/mimetype v1.4.15/go.mod h1:azpTcoLcDZRNgFou5j+APrqQx9HqVPWa6ijYQIIVswQ=
 github.com/gmb-lib/go-asice v1.6.1 h1:HPRMTZZHdXXoIxe9iv6Ml02DHtx0gPsb5Fxu97dhySQ=
 github.com/gmb-lib/go-asice v1.6.1/go.mod h1:6iEItUGxNPxXeVop1itEn5XXjSqeQ8nobdnTgMETZOM=
-github.com/gmb-lib/go-authbyte v0.21.0 h1:44zrEsKqo2+GaoSNA/S6+iXC0zwZeGYadh4glmsgNI8=
-github.com/gmb-lib/go-authbyte v0.21.0/go.mod h1:pXzrf+6yfUdJrfz+zfhvNvaKXlYb8nj+GQGecUJ8zC4=
+github.com/gmb-lib/go-authbyte v0.22.0 h1:V1ExVGv9KcM0/64fOAeHMryUn46wdj6E5GyQ8c385XE=
+github.com/gmb-lib/go-authbyte v0.22.0/go.mod h1:pXzrf+6yfUdJrfz+zfhvNvaKXlYb8nj+GQGecUJ8zC4=
 github.com/gmb-lib/go-docgate v1.0.3 h1:fJGmdPutWDQAGWL5q48mna3aPV4pxRQWiQcnlkSn4kM=
 github.com/gmb-lib/go-docgate v1.0.3/go.mod h1:obvHGBHdQb8GhyHopRYHl19oUi4Hn7s5tusu4giZa4o=
 github.com/gmb-lib/go-eidas-audit v1.2.4 h1:O/oBQ9f5H5wztm2JB436SMiA4YI9GVprMl2z6vgVJQk=
