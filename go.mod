@@ -5,6 +5,7 @@ go 1.27.0
 require (
 	azugo.io/azugo v0.38.1
 	azugo.io/core v0.38.1
+	github.com/VictoriaMetrics/metrics v1.44.0
 	github.com/gmb-lib/go-authbyte v0.22.0
 	github.com/gmb-lib/go-docgate v1.0.3
 	github.com/gmb-lib/go-eidas-audit v1.2.4
@@ -22,7 +23,6 @@ require (
 
 require (
 	azugo.io/opentelemetry v0.38.1 // indirect
-	github.com/VictoriaMetrics/metrics v1.44.0 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cenkalti/backoff/v7 v7.0.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect

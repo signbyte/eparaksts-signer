@@ -3,6 +3,85 @@
 Notable changes to this service, newest first, per release. This file is written for whoever
 runs the service or integrates against it.
 
+## v0.2.0 (unreleased)
+
+### Added — choose whose certificate requests the timestamp, per signing flow
+
+The certificate sent as the finalize `authCertificate` is what the timestamp is requested with.
+Until now that was always the signer's own authentication certificate, carried on the request — the
+signer is entitled to the timestamp, so it costs the deployment nothing — except on the `csc` flow,
+which used a certificate from configuration.
+
+That choice is now configuration, and it applies to any flow:
+
+| variable | default | meaning |
+|---|---|---|
+| `TSA_ACCESS_CERT` | — | this deployment's own timestamping-access certificate (base64, one line; `_FILE` also read) |
+| `TSA_ACCESS_CERT_FLOWS` | `csc` | `all`, or a comma-separated list of flow names |
+
+A flow named in the list finalizes with `TSA_ACCESS_CERT`, so **its timestamps are billed to this
+deployment rather than to the signer**. Every other flow uses the signer's own certificate, exactly
+as before. The default reproduces the previous behaviour, so an upgrade changes nothing.
+
+This exists because not every signing method can supply a certificate that is entitled to a
+timestamp — some methods' authentication certificates carry no timestamping entitlement, and some
+issue no authentication certificate at all. Those methods send an empty `authCertificate` and can
+only be finalized when the deployment supplies one.
+
+An unrecognized flow name is **reported at startup and otherwise ignored** — it selects nothing.
+The log line names the unrecognized entry and the valid flow names.
+
+### Changed — a signing with no certificate to timestamp with is refused, not finalized with the wrong one
+
+Previously an `eid` preparation that carried no `authCertificate` was finalized with the **signing**
+certificate instead. The two are not interchangeable: only the authentication certificate is what a
+timestamp can be requested with, so the substitution produced a request against the wrong
+certificate — which looks correct locally and is refused by a real timestamping service.
+
+Such a signing is now refused **before any call to the provider**, with the reason naming what is
+missing and the alternative:
+
+```
+err:signing:missingAuthCertificate — no certificate to request the timestamp with (send the
+signer's authCertificate, or configure this flow to use the deployment's timestamping-access
+certificate)
+```
+
+Callers that already send the signer's authentication certificate — which includes the portal on
+every card signing — are unaffected.
+
+### Added — every timestamp says whose certificate requested it
+
+A timestamp requested with `TSA_ACCESS_CERT` is billed to this deployment; one requested with the
+signer's own certificate is not. Nothing in the validation answer distinguishes the two afterwards,
+so the service now records it.
+
+Two counters on the metrics endpoint, kept apart so a refusal can never inflate what the deployment
+owes:
+
+| metric | labels |
+|---|---|
+| `signing_timestamp_requests_total` | `source` (`deployment` \| `signer`), `flow`, `op` (`sign` \| `archive`) |
+| `signing_timestamp_refused_total` | `flow`, `op` |
+
+Summing `signing_timestamp_requests_total{source="deployment"}` over a period is what the deployment
+paid for.
+
+Each timestamp also logs one line at INFO — `certificate_source`, `flow`, `operation` and the job id
+— and, when the deployment's own certificate was used, a truncated SHA-256 **fingerprint** of it, so
+a charge stays reconcilable after the deployment rotates to another certificate. The certificate
+itself is never logged by this line.
+
+A signing or archive refused for want of any certificate logs at WARN and increments
+`signing_timestamp_refused_total`. That is a configuration fault, and nothing else announces it
+until someone tries to sign.
+
+### Deprecated — `CSC_AUTH_CERT`
+
+`CSC_AUTH_CERT` is the former spelling of `TSA_ACCESS_CERT` and is read only while the new variable
+is unset; startup logs a warning when it is what supplied the certificate. Set `TSA_ACCESS_CERT` to
+the same value. It will be removed in a later release.
+
 ## v0.1.1
 
 ### Fixed — a version tag points at the signed image digest again

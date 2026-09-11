@@ -64,10 +64,28 @@ type Configuration struct {
 	CSCBaseURL      string `mapstructure:"csc_base_url" validate:"omitempty,url"`
 	CSCClientID     string `mapstructure:"csc_client_id"`
 	CSCClientSecret string `mapstructure:"csc_client_secret"`
-	// CSCAuthCert is the interim config-supplied finalize authCertificate for the
-	// csc flow ONLY (base64-DER) — every other use case sends the signed-in
-	// user's own authentication certificate with the request.
+	// CSCAuthCert is the deprecated spelling of TSAAccessCert, kept for one
+	// release: it is read only when TSA_ACCESS_CERT is unset.
 	CSCAuthCert string `mapstructure:"csc_auth_cert"`
+
+	// --- who requests the timestamp ---
+
+	// TSAAccessCert is this deployment's own timestamping-access certificate
+	// (base64), used as the finalize authCertificate for the flows named in
+	// TSAAccessCertFlows. It is what the timestamp is requested with, so the
+	// timestamp is billed to this deployment rather than to the signer.
+	//
+	// The alternative — and the default for every other flow — is the signer's
+	// own authentication certificate, with which the timestamp is free to them.
+	// Some signing methods cannot offer one at all (their certificates carry no
+	// timestamping entitlement, or the method issues no authentication
+	// certificate), and those are the flows this setting exists for.
+	TSAAccessCert string `mapstructure:"tsa_access_cert"`
+	// TSAAccessCertFlows names the flows that finalize with TSAAccessCert:
+	// "all", or a comma-separated list of flow names. Every other flow uses the
+	// signer's own certificate and is refused if it supplies none. An
+	// unrecognized name is reported at startup and otherwise ignored.
+	TSAAccessCertFlows string `mapstructure:"tsa_access_cert_flows"`
 
 	// Identity fetch retry (sign_identities materialize asynchronously).
 	IdentityFetchRetries int           `mapstructure:"tx_identity_fetch_retries"`
@@ -145,6 +163,10 @@ func (c *Configuration) Bind(_ string, v *viper.Viper) {
 	loadSecret(v, "tx_client_secret", "EPARAKSTS_CLIENT_SECRET")
 	loadSecret(v, "csc_client_secret", "CSC_CLIENT_SECRET")
 	loadSecret(v, "csc_auth_cert", "CSC_AUTH_CERT")
+	loadSecret(v, "tsa_access_cert", "TSA_ACCESS_CERT")
+	v.SetDefault("tsa_access_cert_flows", signing.DefaultTSAAccessCertFlows)
+	_ = v.BindEnv("tsa_access_cert", "TSA_ACCESS_CERT")
+	_ = v.BindEnv("tsa_access_cert_flows", "TSA_ACCESS_CERT_FLOWS")
 	_ = v.BindEnv("signapi_base_url", "SIGNAPI_BASE_URL")
 	_ = v.BindEnv("tx_base_url", "TX_BASE_URL")
 	_ = v.BindEnv("tx_as_path", "TX_AS_PATH")
@@ -255,8 +277,32 @@ func (c *Configuration) OrchestratorConfig() signing.Config {
 		DefaultSignatureQualifier: c.DefaultSignatureQualifier,
 		EIDScanPollInterval:       c.EIDScanPollInterval,
 		EIDScanDeadline:           c.EIDScanDeadline,
-		CSCAuthCert:               c.CSCAuthCert,
+		TSAAccessCert:             c.tsaAccessCert(),
+		TSAAccessCertFlows:        signing.ParseFlowSet(c.TSAAccessCertFlows),
 	}
+}
+
+// tsaAccessCert resolves the timestamping-access certificate, honouring the
+// deprecated spelling while it lives.
+func (c *Configuration) tsaAccessCert() string {
+	if v := strings.TrimSpace(c.TSAAccessCert); v != "" {
+		return v
+	}
+
+	return strings.TrimSpace(c.CSCAuthCert)
+}
+
+// UnknownTSAAccessCertFlows returns the names in TSA_ACCESS_CERT_FLOWS that are
+// not signing flows, so startup can report them. Almost always a typo, and an
+// unrecognized name selects nothing, so it is reported rather than fatal.
+func (c *Configuration) UnknownTSAAccessCertFlows() []string {
+	return signing.UnknownFlowNames(c.TSAAccessCertFlows)
+}
+
+// UsesDeprecatedAuthCertSetting reports whether the deprecated spelling is
+// what supplied the certificate, so startup can say so once.
+func (c *Configuration) UsesDeprecatedAuthCertSetting() bool {
+	return strings.TrimSpace(c.TSAAccessCert) == "" && strings.TrimSpace(c.CSCAuthCert) != ""
 }
 
 // auditIssuer returns the issuer base for the outbound audit token mint.

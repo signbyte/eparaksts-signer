@@ -66,8 +66,6 @@ func (f *cscFlow) BeginAuthorization(ctx *azugo.Context, j *job.Job) (string, er
 	j.OAuthState = state
 	j.PKCEVerifier = verifier
 	j.PendingLeg = job.LegCredential
-	// Interim finalize authCertificate from config.
-	j.AuthCert = f.o.cfg.CSCAuthCert
 
 	// OPEN (item Cert): the `documentDigests` consent binding needs the digests
 	// up front, but the csc signing cert is only available after the credential
@@ -109,9 +107,6 @@ func (f *cscFlow) AdvanceCallback(ctx *azugo.Context, j *job.Job, code string) (
 	j.CredentialID = credID
 	j.SigningCert = cred.Cert.Certificates[0]
 	j.SubjectRef = certSubject(j.SigningCert)
-	if j.AuthCert == "" {
-		j.AuthCert = j.SigningCert
-	}
 
 	if err := f.o.calculateDigests(ctx, j, j.SigningCert); err != nil {
 		return "", false, err
