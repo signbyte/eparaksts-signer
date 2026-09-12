@@ -101,9 +101,10 @@ func TestArchiveUpload(t *testing.T) {
 			_, _ = w.Write([]byte("ARCHIVEDBYTES"))
 		}
 	})
-	// The configured csc cert must play no part in an archive: the caller
-	// supplies the signed-in user's cert, and without one the call refuses.
-	o.cfg = Config{CSCAuthCert: "ENVCERT"}
+	// The deployment's own certificate must play no part in an upload archive:
+	// this call carries no job, so there is no flow to configure, and the caller
+	// supplies the signed-in user's certificate or the call refuses.
+	o.cfg = Config{TSAAccessCert: "ENVCERT", TSAAccessCertFlows: ParseFlowSet("all")}
 
 	_, _, _, err := o.ArchiveUpload(context.Background(), "corr", "signed.edoc", "", "", []byte("EDOC"))
 	qt.Assert(t, qt.ErrorIs(err, ErrNoAuthCert))
@@ -113,14 +114,15 @@ func TestArchiveUpload(t *testing.T) {
 	qt.Check(t, qt.DeepEquals(archived, []byte("ARCHIVEDBYTES")))
 	qt.Check(t, qt.Equals(ct, "application/vnd.etsi.asic-e+zip"))
 	qt.Check(t, qt.Equals(name, "signed-archived.edoc"))
-	qt.Check(t, qt.Equals(gotAuthCert, "USERCERT")) // the user's cert, never the csc config
+	qt.Check(t, qt.Equals(gotAuthCert, "USERCERT")) // the user's cert, never the configured one
 	// Regression guard: the archived form is downloaded by the UPLOAD's data.id, not
 	// a guessed "last file in the session list" entry.
 	qt.Check(t, qt.Equals(gotDownloadPath, "/api-storage/v1.0/s1/doc-1"))
 }
 
 // TestArchiveUploadPrefersRequestCert confirms the request-supplied cert (the
-// signed-in user's) wins over CSC_AUTH_CERT, and the PDF media type/extension.
+// signed-in user's) is what an upload archive uses even when the deployment has
+// its own certificate configured, and the PDF media type/extension.
 func TestArchiveUploadPrefersRequestCert(t *testing.T) {
 	var gotAuthCert string
 	o := newSpineOrchestrator(t, func(w http.ResponseWriter, r *http.Request) {
@@ -142,7 +144,7 @@ func TestArchiveUploadPrefersRequestCert(t *testing.T) {
 			_, _ = w.Write([]byte("PDF"))
 		}
 	})
-	o.cfg = Config{CSCAuthCert: "ENVCERT"}
+	o.cfg = Config{TSAAccessCert: "ENVCERT", TSAAccessCertFlows: ParseFlowSet("all")}
 
 	_, ct, name, err := o.ArchiveUpload(context.Background(), "corr", "doc.pdf", "application/pdf", "USERCERT", []byte("PDF"))
 	qt.Assert(t, qt.IsNil(err))

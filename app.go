@@ -211,6 +211,8 @@ func (a *App) init() error {
 		a.Log().Warn("ACCESS_AUDIT_URL not set — GDPR (GDPR-audit) access records will NOT be posted (development); eIDAS-audit signing evidence + NIS2-audit security telemetry still emit")
 	}
 
+	a.reportTimestampCertSettings()
+
 	a.audit = audit.New(eidasEmitter, secEmitter, gc, psn, a.Log())
 
 	return nil
@@ -261,3 +263,19 @@ func (a *App) CallbackPath() string { return a.config.CallbackPath() }
 
 // SetAuthMiddleware overrides the inbound auth middleware (test use only).
 func (a *App) SetAuthMiddleware(mw azugo.RequestHandlerFunc) { a.authMW = mw }
+
+// reportTimestampCertSettings says once, at startup, what is wrong with the
+// timestamping-certificate settings. An unrecognized flow name selects nothing
+// and is almost always a typo, so it is reported rather than fatal: the flow it
+// was meant to name keeps using the signer's own certificate, or — when that
+// flow supplies none — is refused when a signature is finalized.
+func (a *App) reportTimestampCertSettings() {
+	if unknown := a.config.UnknownTSAAccessCertFlows(); len(unknown) > 0 {
+		a.Log().Error("TSA_ACCESS_CERT_FLOWS names no such signing flow — it selects nothing; check the spelling",
+			zap.Strings("unrecognized", unknown),
+			zap.Strings("flows", signing.KnownFlowNames()))
+	}
+	if a.config.UsesDeprecatedAuthCertSetting() {
+		a.Log().Warn("CSC_AUTH_CERT is deprecated and will be removed — set TSA_ACCESS_CERT instead (same value)")
+	}
+}

@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/go-quicktest/qt"
+
+	"github.com/signbyte/eparaksts-signer/job"
 )
 
 func TestCallbackPath(t *testing.T) {
@@ -68,13 +70,32 @@ func TestOrchestratorConfigMapping(t *testing.T) {
 		DefaultSignatureQualifier: "eu_eidas_qes",
 		EIDScanPollInterval:       time.Second,
 		EIDScanDeadline:           90 * time.Second,
-		CSCAuthCert:               "base64-cert",
+		TSAAccessCert:             "base64-cert",
+		TSAAccessCertFlows:        "webEid",
 	}
 	oc := c.OrchestratorConfig()
 	qt.Check(t, qt.Equals(oc.DefaultSignatureQualifier, "eu_eidas_qes"))
 	qt.Check(t, qt.Equals(oc.EIDScanPollInterval, time.Second))
 	qt.Check(t, qt.Equals(oc.EIDScanDeadline, 90*time.Second))
-	qt.Check(t, qt.Equals(oc.CSCAuthCert, "base64-cert"))
+	qt.Check(t, qt.Equals(oc.TSAAccessCert, "base64-cert"))
+	qt.Check(t, qt.IsTrue(oc.TSAAccessCertFlows.Has(job.FlowWebEID)))
+	qt.Check(t, qt.IsFalse(oc.TSAAccessCertFlows.Has(job.FlowCSC)))
+}
+
+// The deprecated spelling keeps working while it lives, and the new one wins.
+func TestTimestampCertificateSettingResolution(t *testing.T) {
+	deprecatedOnly := &Configuration{CSCAuthCert: "old-cert"}
+	qt.Check(t, qt.Equals(deprecatedOnly.OrchestratorConfig().TSAAccessCert, "old-cert"))
+	qt.Check(t, qt.IsTrue(deprecatedOnly.UsesDeprecatedAuthCertSetting()))
+
+	both := &Configuration{CSCAuthCert: "old-cert", TSAAccessCert: "new-cert"}
+	qt.Check(t, qt.Equals(both.OrchestratorConfig().TSAAccessCert, "new-cert"))
+	qt.Check(t, qt.IsFalse(both.UsesDeprecatedAuthCertSetting()))
+
+	typo := &Configuration{TSAAccessCertFlows: "webEid,cscc"}
+	qt.Check(t, qt.DeepEquals(typo.UnknownTSAAccessCertFlows(), []string{"cscc"}))
+	// The typo does not take the valid entry down with it.
+	qt.Check(t, qt.IsTrue(typo.OrchestratorConfig().TSAAccessCertFlows.Has(job.FlowWebEID)))
 }
 
 func TestNewConfiguration(t *testing.T) {

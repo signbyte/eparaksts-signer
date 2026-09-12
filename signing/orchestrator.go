@@ -28,6 +28,12 @@ var (
 	ErrBatchUnsupport = errors.New("signing: batch not supported for this flow")
 	ErrMixedFormat    = errors.New("signing: mixed-format batch not supported")
 	ErrNoAuthCert     = errors.New("signing: no auth certificate (supply the signed-in user's authCertificate)")
+	// ErrNoTimestampCert means nothing can request the timestamp for this
+	// signing: the request carried no authentication certificate, and this
+	// flow is not configured to use the deployment's own timestamping-access
+	// certificate. Client-actionable — send the signer's certificate, or
+	// configure the deployment to pay for this flow's timestamps.
+	ErrNoTimestampCert = errors.New("signing: no certificate to request the timestamp with (send the signer's authCertificate, or configure this flow to use the deployment's timestamping-access certificate)")
 	// ErrDocumentRejected means the signing provider gave a definitive rejection
 	// (a 4xx) of the document we sent — it is not a valid signed document (e.g. not
 	// a PDF, or a PDF with no signature to extend). Client-actionable, NOT an
@@ -53,9 +59,12 @@ type Config struct {
 	DefaultSignatureQualifier string
 	EIDScanPollInterval       time.Duration
 	EIDScanDeadline           time.Duration
-	// CSCAuthCert is the config-supplied finalize authCertificate for csc
-	// (interim — the TSA client identifier).
-	CSCAuthCert string
+	// TSAAccessCert is this deployment's own timestamping-access certificate
+	// (base64), used as the finalize authCertificate for TSAAccessCertFlows.
+	TSAAccessCert string
+	// TSAAccessCertFlows names the flows that finalize with TSAAccessCert
+	// rather than with the signer's own authentication certificate.
+	TSAAccessCertFlows FlowSet
 }
 
 // Orchestrator runs the shared spine and dispatches to the SigningFlow seam.
@@ -149,14 +158,12 @@ func (o *Orchestrator) Prepare(ctx *azugo.Context, in PrepareInput) (*PrepareRes
 
 	if caps.ClientSide {
 		// eid: the card certs are supplied; compute the digests and hand them back.
-		// SigningCert feeds CalculateDigest; AuthCert is the SignAPI finalize
-		// authCertificate (used for TSA access — must be the eID AUTH cert, not the
-		// signing cert). Fall back to the signing cert only if no auth cert was sent.
+		// The signing certificate feeds the digest calculation; the authentication
+		// certificate is what the timestamp is later requested with, and the two are
+		// not interchangeable — a missing one is refused at finalize rather than
+		// replaced by the other.
 		j.SigningCert = in.SigningCert
 		j.AuthCert = in.AuthCert
-		if j.AuthCert == "" {
-			j.AuthCert = in.SigningCert
-		}
 		j.SubjectRef = certSubject(in.SigningCert)
 		if err := o.calculateDigests(ctx, j, in.SigningCert); err != nil {
 			j.Fail("signapi:calculate_digest_failed", err.Error())
@@ -501,6 +508,16 @@ func (o *Orchestrator) calculateDigests(ctx context.Context, j *job.Job, signing
 // finalize normalizes every signature to DER and applies it, then marks the
 // documents READY and the job complete.
 func (o *Orchestrator) finalize(ctx context.Context, j *job.Job) error {
+	// Resolved first: without a certificate to request the timestamp with there
+	// is nothing to finalize, and refusing here costs no upstream traffic.
+	authCert, certSource, ok := o.authCertFor(j)
+	if !ok {
+		o.recordTimestampRefused(j, OpSign)
+
+		return ErrNoTimestampCert
+	}
+	o.recordTimestampRequest(j, certSource, OpSign, authCert)
+
 	ssv := make([]signapi.SessionSignatureValue, 0, len(j.Documents))
 	for i := range j.Documents {
 		d := &j.Documents[i]
@@ -533,7 +550,7 @@ func (o *Orchestrator) finalize(ctx context.Context, j *job.Job) error {
 
 	if err := o.signapi.FinalizeSigning(ctx, j.JobID, signapi.FinalizeRequest{
 		SessionSignatureValues: ssv,
-		AuthCertificate:        j.AuthCert,
+		AuthCertificate:        authCert,
 	}); err != nil {
 		return err
 	}

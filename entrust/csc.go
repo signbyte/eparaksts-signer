@@ -95,7 +95,7 @@ func (c *Client) CSCExchange(ctx context.Context, code, codeVerifier string) (st
 type cscSignHashRequest struct {
 	CredentialID string   `json:"credentialID"`
 	SAD          string   `json:"SAD,omitempty"` // signature activation data (open: account_token, item E)
-	Hashes       []string `json:"hashes"`        // base64 digests, in request order ([CSC v2 §11.13])
+	Hashes       []string `json:"hashes"`        // base64 digests, in request order ([CSC API V2.2.0.0 §11.13])
 	SignAlgo     string   `json:"signAlgo"`      // signature algorithm OID
 }
 

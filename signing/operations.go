@@ -108,10 +108,13 @@ func (o *Orchestrator) ArchiveJobDocument(ctx context.Context, jobID, documentID
 	if d.State != job.DocReady {
 		return nil, "", "", ErrWrongState
 	}
-	authCert := j.AuthCert
-	if strings.TrimSpace(authCert) == "" {
-		return nil, "", "", ErrNoAuthCert
+	authCert, certSource, ok := o.authCertFor(j)
+	if !ok {
+		o.recordTimestampRefused(j, OpArchive)
+
+		return nil, "", "", ErrNoTimestampCert
 	}
+	o.recordTimestampRequest(j, certSource, OpArchive, authCert)
 	if err := o.signapi.AddArchiveTimestamp(ctx, jobID, d.SessionID, authCert); err != nil {
 		return nil, "", "", classifyUpstream(err)
 	}

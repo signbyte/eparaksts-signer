@@ -89,7 +89,7 @@ func (r *router) writeContainer(ctx *azugo.Context, contentType, filename string
 // mapArchiveErr maps archive errors onto the right problem envelope.
 func (r *router) mapArchiveErr(ctx *azugo.Context, err error) {
 	switch {
-	case errors.Is(err, signing.ErrNoAuthCert):
+	case errors.Is(err, signing.ErrNoAuthCert), errors.Is(err, signing.ErrNoTimestampCert):
 		ctx.Error(pkerrors.NewProblem("err:signing:missingAuthCertificate",
 			pkerrors.WithStatus(fasthttp.StatusBadRequest),
 			pkerrors.WithDetail(err.Error())))
