@@ -6,12 +6,12 @@ require (
 	azugo.io/azugo v0.38.1
 	azugo.io/core v0.38.1
 	github.com/VictoriaMetrics/metrics v1.44.0
-	github.com/gmb-lib/go-authbyte v0.22.0
-	github.com/gmb-lib/go-docgate v1.0.3
-	github.com/gmb-lib/go-eidas-audit v1.2.4
-	github.com/gmb-lib/go-gdpr-audit v1.1.4
-	github.com/gmb-lib/go-platform-kit v1.11.2
-	github.com/gmb-lib/go-sec-events v1.1.4
+	github.com/gmb-lib/go-authbyte v0.23.1
+	github.com/gmb-lib/go-docgate v1.0.4
+	github.com/gmb-lib/go-eidas-audit v1.2.5
+	github.com/gmb-lib/go-gdpr-audit v1.1.5
+	github.com/gmb-lib/go-platform-kit v1.11.3
+	github.com/gmb-lib/go-sec-events v1.2.1
 	github.com/go-quicktest/qt v1.102.0
 	github.com/oklog/ulid/v2 v2.1.2
 	github.com/redis/go-redis/v9 v9.22.0
@@ -32,7 +32,7 @@ require (
 	github.com/felixge/httpsnoop v1.1.0 // indirect
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.15 // indirect
-	github.com/gmb-lib/go-asice v1.6.1 // indirect
+	github.com/gmb-lib/go-asice v1.6.2 // indirect
 	github.com/go-jose/go-jose/v4 v4.1.5 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
@@ -55,8 +55,8 @@ require (
 	github.com/leodido/go-urn v1.5.0 // indirect
 	github.com/mattn/go-colorable v0.1.15 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
-	github.com/mattn/go-runewidth v0.0.28 // indirect
-	github.com/molecule-man/go-brrr v1.0.1 // indirect
+	github.com/mattn/go-runewidth v0.0.30 // indirect
+	github.com/molecule-man/go-brrr v1.1.0 // indirect
 	github.com/nats-io/nats.go v1.53.1 // indirect
 	github.com/nats-io/nkeys v0.4.16 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
@@ -95,12 +95,12 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/crypto v0.57.0 // indirect
-	golang.org/x/image v0.45.0 // indirect
+	golang.org/x/image v0.46.0 // indirect
 	golang.org/x/net v0.59.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
-	google.golang.org/genproto/googleapis/api v0.0.0-20260908043556-f8649ddbbfe6 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260908043556-f8649ddbbfe6 // indirect
+	google.golang.org/genproto/googleapis/api v0.0.0-20260911204522-f61a6ca850bd // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260911204522-f61a6ca850bd // indirect
 	google.golang.org/grpc v1.83.2 // indirect
 	google.golang.org/protobuf v1.36.12 // indirect
 )

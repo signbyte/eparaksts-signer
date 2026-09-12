@@ -82,6 +82,17 @@ until someone tries to sign.
 is unset; startup logs a warning when it is what supplied the certificate. Set `TSA_ACCESS_CERT` to
 the same value. It will be removed in a later release.
 
+### Changed — the shared libraries move to their current releases
+
+`go-platform-kit` v1.11.3, `go-authbyte` v0.23.1, `go-eidas-audit` v1.2.5, `go-docgate` v1.0.4,
+`go-gdpr-audit` v1.1.5 and `go-sec-events` v1.2.1 (with `go-asice` v1.6.2 arriving indirectly
+through the document gate). No endpoint, field, error or setting changes with them, nothing in your
+configuration needs touching, and this service's own behaviour is unchanged — signing, finalize and
+the evidence events are exactly as before, and the frozen audit envelope is untouched. Two crossed
+releases are worth naming: `go-authbyte` v0.23.0 added a way to tell a natural person's identity
+code from an organisation's, and `go-sec-events` v1.2.0 allows a security event to be emitted from
+work with no request behind it. Both are additions to the libraries.
+
 ## v0.1.1
 
 ### Fixed — a version tag points at the signed image digest again
