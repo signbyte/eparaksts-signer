@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"azugo.io/azugo"
+	"github.com/gmb-lib/go-csc/lvrtc"
 	"github.com/oklog/ulid/v2"
 	"go.uber.org/zap"
 
@@ -91,7 +92,8 @@ func New(jobs *job.Store, sa *signapi.Client, ent *entrust.Client, cfg Config, l
 	o := &Orchestrator{jobs: jobs, signapi: sa, entrust: ent, cfg: cfg, log: log}
 	o.flows = map[job.Flow]Flow{
 		job.FlowWebEID:               &eidFlow{o: o},
-		job.FlowCSC:                  &cscFlow{o: o},
+		job.FlowCSCEidScan:           &cscFlow{o: o, flow: job.FlowCSCEidScan, eid: lvrtc.EIDScan},
+		job.FlowCSCEidPlugin:         &cscFlow{o: o, flow: job.FlowCSCEidPlugin, eid: lvrtc.CardOnComputer},
 		job.FlowEParakstsMobile:      &txFlow{o: o, variant: txMobile},
 		job.FlowEIDScan:              &txFlow{o: o, variant: txEIDScan},
 		job.FlowEParakstsMobileEseal: &txFlow{o: o, variant: txCloudEseal},
@@ -117,7 +119,7 @@ func (o *Orchestrator) Prepare(ctx *azugo.Context, in PrepareInput) (*PrepareRes
 	if err := validateBatch(in, caps); err != nil {
 		return nil, err
 	}
-	if in.Flow == job.FlowCSC && !o.entrust.CSCEnabled() {
+	if in.Flow.IsCSC() && !o.entrust.CSCEnabled() {
 		return nil, ErrCSCNotEnabled
 	}
 
@@ -185,11 +187,11 @@ func (o *Orchestrator) Prepare(ctx *azugo.Context, in PrepareInput) (*PrepareRes
 		// resolution. Only a complete set is taken — anything missing and the
 		// flow resolves identities itself, exactly as without a caller supply.
 		//
-		// csc takes only the authentication certificate: its signing credential is
+		// A CSC flow takes only the authentication certificate: its signing credential is
 		// minted for this signing, and the login's authentication certificate is what
 		// the timestamp can be requested with.
 		switch {
-		case in.Flow == job.FlowCSC:
+		case in.Flow.IsCSC():
 			j.AuthCert = in.AuthCert
 		case in.SignIdentityID != "" && in.SigningCert != "" && in.AuthCert != "":
 			j.SignIdentityID = in.SignIdentityID

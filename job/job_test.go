@@ -10,7 +10,7 @@ import (
 // TestFlowValid checks the known flows are accepted and everything else
 // (including case variants) is rejected.
 func TestFlowValid(t *testing.T) {
-	for _, f := range []Flow{FlowCSC, FlowWebEID, FlowEParakstsMobile, FlowEIDScan, FlowEParakstsMobileEseal} {
+	for _, f := range []Flow{FlowWebEID, FlowEParakstsMobile, FlowEIDScan, FlowEParakstsMobileEseal, FlowCSCEidScan, FlowCSCEidPlugin} {
 		t.Run("valid/"+string(f), func(t *testing.T) {
 			qt.Check(t, qt.IsTrue(f.Valid()))
 		})

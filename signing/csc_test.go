@@ -24,6 +24,7 @@ import (
 
 	"azugo.io/azugo"
 	"github.com/gmb-lib/go-csc"
+	"github.com/gmb-lib/go-csc/lvrtc"
 	"github.com/go-quicktest/qt"
 	"go.uber.org/zap"
 
@@ -132,14 +133,50 @@ func newCSCOrchestrator(t *testing.T) (*Orchestrator, *fakeCSC) {
 	fake, srv := newFakeCSC(t)
 	o.entrust = entrust.New(entrust.Config{
 		CSCBaseURL: srv.URL, CSCClientID: "app", CSCClientSecret: "s",
-		RedirectURI:  "https://signer.example/sign/eparaksts/callback",
-		CSCACRValues: "urn:eparaksts:authentication:flow:mobile-eid",
+		RedirectURI: "https://signer.example/sign/eparaksts/callback",
 	}, zap.NewNop())
 	return o, fake
 }
 
+// scanFlow is the eID Scan CSC flow on the test orchestrator.
+func scanFlow(o *Orchestrator) *cscFlow {
+	return &cscFlow{o: o, flow: job.FlowCSCEidScan, eid: lvrtc.EIDScan}
+}
+
+// The orchestrator carries one CSC flow per way the card is read, each sending its
+// own acr_values, and the retired single flow is not a flow any more.
+func TestCSCFlowsRegisteredByCardRoute(t *testing.T) {
+	o := New(nil, nil, nil, Config{}, nil)
+	scan, ok := o.Flow(job.FlowCSCEidScan).(*cscFlow)
+	qt.Assert(t, qt.IsTrue(ok))
+	qt.Check(t, qt.Equals(scan.eid, lvrtc.EIDScan))
+	qt.Check(t, qt.Equals(scan.Type(), job.FlowCSCEidScan))
+	plugin, ok := o.Flow(job.FlowCSCEidPlugin).(*cscFlow)
+	qt.Assert(t, qt.IsTrue(ok))
+	qt.Check(t, qt.Equals(plugin.eid, lvrtc.CardOnComputer))
+	qt.Check(t, qt.Equals(plugin.Type(), job.FlowCSCEidPlugin))
+	qt.Check(t, qt.IsNil(o.Flow(job.Flow("csc"))))
+}
+
+// The card-in-reader flow asks the provider for its card route in both authorizations.
+func TestCSCPluginFlowSendsTheCardRoute(t *testing.T) {
+	o, fake := newCSCOrchestrator(t)
+	f := &cscFlow{o: o, flow: job.FlowCSCEidPlugin, eid: lvrtc.CardOnComputer}
+	j := cscJob()
+	j.Flow = job.FlowCSCEidPlugin
+	ctx := &azugo.Context{}
+	_, err := f.BeginAuthorization(ctx, j)
+	qt.Assert(t, qt.IsNil(err))
+	_, _, err = f.AdvanceCallback(ctx, j, "registration")
+	qt.Assert(t, qt.IsNil(err))
+	qt.Assert(t, qt.HasLen(fake.pushed, 2))
+	for _, form := range fake.pushed {
+		qt.Check(t, qt.Equals(form.Get("acr_values"), string(lvrtc.CardOnComputer)))
+	}
+}
+
 func cscJob() *job.Job {
-	return &job.Job{JobID: "j1", Flow: job.FlowCSC, Documents: []job.Document{
+	return &job.Job{JobID: "j1", Flow: job.FlowCSCEidScan, Documents: []job.Document{
 		{DocumentID: "d1", SessionID: "s1", Format: job.FormatXAdES, Operation: job.OpCreate, State: job.DocPending},
 	}}
 }
@@ -150,7 +187,7 @@ func cscJob() *job.Job {
 // token, and a signature verified against the certificate before finalize sees it.
 func TestCSCFlowTwoAuthorizationsThenVerifiedSignature(t *testing.T) {
 	o, fake := newCSCOrchestrator(t)
-	f := &cscFlow{o: o}
+	f := scanFlow(o)
 	j := cscJob()
 	ctx := &azugo.Context{}
 
@@ -202,7 +239,7 @@ func TestCSCFlowTwoAuthorizationsThenVerifiedSignature(t *testing.T) {
 func TestCSCFlowRefusesAnUnboundAuthorization(t *testing.T) {
 	o, fake := newCSCOrchestrator(t)
 	fake.unbound = true
-	f := &cscFlow{o: o}
+	f := scanFlow(o)
 	j := cscJob()
 	ctx := &azugo.Context{}
 	_, err := f.BeginAuthorization(ctx, j)
@@ -220,7 +257,7 @@ func TestCSCFlowRefusesAnUnboundAuthorization(t *testing.T) {
 func TestCSCFlowRefusesASignatureThatDoesNotVerify(t *testing.T) {
 	o, fake := newCSCOrchestrator(t)
 	fake.badSig = true
-	f := &cscFlow{o: o}
+	f := scanFlow(o)
 	j := cscJob()
 	ctx := &azugo.Context{}
 	_, _ = f.BeginAuthorization(ctx, j)
@@ -239,7 +276,7 @@ func TestCSCFlowRefusesASignatureThatDoesNotVerify(t *testing.T) {
 func TestCSCFlowRefusesAnExpiringCredential(t *testing.T) {
 	o, fake := newCSCOrchestrator(t)
 	fake.certUntil = time.Minute
-	f := &cscFlow{o: o}
+	f := scanFlow(o)
 	j := cscJob()
 	ctx := &azugo.Context{}
 	_, _ = f.BeginAuthorization(ctx, j)

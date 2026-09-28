@@ -58,15 +58,3 @@ func (c *Client) CSC() *csc.Client {
 func (c *Client) CSCRedirectURI() string {
 	return c.cfg.RedirectURI
 }
-
-// CSCEIDFlows is how the person is authenticated during the CSC authorizations:
-// the configured eID flows, or none — the provider then offers its own choice.
-func (c *Client) CSCEIDFlows() lvrtc.EIDFlows {
-	var flows lvrtc.EIDFlows
-	for _, f := range strings.Split(c.cfg.CSCACRValues, "|") {
-		if f = strings.TrimSpace(f); f != "" {
-			flows = append(flows, lvrtc.EIDFlow(f))
-		}
-	}
-	return flows
-}

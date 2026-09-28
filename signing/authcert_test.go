@@ -19,9 +19,9 @@ import (
 )
 
 func TestParseFlowSetSelectsOnlyTheNamedFlows(t *testing.T) {
-	set := ParseFlowSet("csc, webEid")
+	set := ParseFlowSet("cscEidScan, webEid")
 
-	for _, f := range []job.Flow{job.FlowCSC, job.FlowWebEID} {
+	for _, f := range []job.Flow{job.FlowCSCEidScan, job.FlowWebEID} {
 		if !set.Has(f) {
 			t.Errorf("Has(%q) = false, want true", f)
 		}
@@ -53,8 +53,10 @@ func TestParseFlowSetEmptySelectsNothing(t *testing.T) {
 
 func TestDefaultFlowListSelectsOnlyTheFlowThatNeverCarriesASignerCertificate(t *testing.T) {
 	set := ParseFlowSet(DefaultTSAAccessCertFlows)
-	if !set.Has(job.FlowCSC) {
-		t.Error("the default does not select csc — an existing deployment would change behaviour")
+	for _, f := range []job.Flow{job.FlowCSCEidScan, job.FlowCSCEidPlugin} {
+		if !set.Has(f) {
+			t.Errorf("the default does not select %s — a CSC signing carries no signer certificate by default", f)
+		}
 	}
 	if set.Has(job.FlowWebEID) {
 		t.Error("the default selects webEid — the card flow must keep using the signer's own certificate")
@@ -62,7 +64,7 @@ func TestDefaultFlowListSelectsOnlyTheFlowThatNeverCarriesASignerCertificate(t *
 }
 
 func TestUnknownFlowNamesReportsTyposAndNothingElse(t *testing.T) {
-	got := UnknownFlowNames(" all , csc , webeid , cscc , ")
+	got := UnknownFlowNames(" all , cscEidScan , webeid , cscc , ")
 	// "webeid" differs in case from the flow name and is a typo like any other:
 	// the list is matched exactly so a misspelling can never silently select.
 	want := map[string]bool{"webeid": true, "cscc": true}
@@ -91,11 +93,11 @@ func TestAuthCertForPicksTheConfiguredCertificateOnlyForSelectedFlows(t *testing
 		wantOK     bool
 	}{
 		{"selected flow uses the deployment certificate", "webEid", job.FlowWebEID, signerCert, deploymentCert, SourceDeployment, true},
-		{"unselected flow uses the signer's own", "csc", job.FlowWebEID, signerCert, signerCert, SourceSigner, true},
-		{"unselected flow with no certificate is refused", "csc", job.FlowWebEID, "", "", SourceSigner, false},
+		{"unselected flow uses the signer's own", "cscEidScan", job.FlowWebEID, signerCert, signerCert, SourceSigner, true},
+		{"unselected flow with no certificate is refused", "cscEidScan", job.FlowWebEID, "", "", SourceSigner, false},
 		{"all selects every flow", "all", job.FlowEIDScan, signerCert, deploymentCert, SourceDeployment, true},
-		{"a selected flow needs no signer certificate", "csc", job.FlowCSC, "", deploymentCert, SourceDeployment, true},
-		{"blank signer certificate is not a certificate", "csc", job.FlowWebEID, "   ", "", SourceSigner, false},
+		{"a selected flow needs no signer certificate", "cscEidScan", job.FlowCSCEidScan, "", deploymentCert, SourceDeployment, true},
+		{"blank signer certificate is not a certificate", "cscEidScan", job.FlowWebEID, "   ", "", SourceSigner, false},
 	}
 
 	for _, tc := range cases {
@@ -133,7 +135,7 @@ func TestFinalizeRefusesRatherThanSubstitutingTheSigningCertificate(t *testing.T
 	o := newSpineOrchestrator(t, func(http.ResponseWriter, *http.Request) {
 		t.Error("the provider was called; the refusal must happen before any upstream traffic")
 	})
-	o.cfg = Config{TSAAccessCert: "deployment-cert", TSAAccessCertFlows: ParseFlowSet("csc")}
+	o.cfg = Config{TSAAccessCert: "deployment-cert", TSAAccessCertFlows: ParseFlowSet("cscEidScan")}
 
 	j := &job.Job{
 		JobID:       "j1",
@@ -194,10 +196,10 @@ func counterValue(t *testing.T, name string, labels map[string]string) float64 {
 func TestTimestampCountersSeparateWhoPaid(t *testing.T) {
 	o := &Orchestrator{log: zap.NewNop(), cfg: Config{
 		TSAAccessCert:      "deployment-cert",
-		TSAAccessCertFlows: ParseFlowSet("csc"),
+		TSAAccessCertFlows: ParseFlowSet("cscEidScan"),
 	}}
 
-	paid := map[string]string{"source": "deployment", "flow": "csc", "op": "sign"}
+	paid := map[string]string{"source": "deployment", "flow": "cscEidScan", "op": "sign"}
 	free := map[string]string{"source": "signer", "flow": "webEid", "op": "sign"}
 	refused := map[string]string{"flow": "webEid", "op": "archive"}
 
@@ -205,11 +207,11 @@ func TestTimestampCountersSeparateWhoPaid(t *testing.T) {
 	baseFree := counterValue(t, MetricTimestampRequests, free)
 	baseRefused := counterValue(t, MetricTimestampRefused, refused)
 
-	cert, source, ok := o.authCertFor(&job.Job{JobID: "j1", Flow: job.FlowCSC})
+	cert, source, ok := o.authCertFor(&job.Job{JobID: "j1", Flow: job.FlowCSCEidScan})
 	if !ok {
 		t.Fatal("the configured flow found no certificate")
 	}
-	o.recordTimestampRequest(&job.Job{JobID: "j1", Flow: job.FlowCSC}, source, OpSign, cert)
+	o.recordTimestampRequest(&job.Job{JobID: "j1", Flow: job.FlowCSCEidScan}, source, OpSign, cert)
 
 	o.recordTimestampRequest(&job.Job{JobID: "j2", Flow: job.FlowWebEID}, SourceSigner, OpSign, "signer-cert")
 	o.recordTimestampRefused(&job.Job{JobID: "j3", Flow: job.FlowWebEID}, OpArchive)

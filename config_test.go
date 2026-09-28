@@ -79,7 +79,7 @@ func TestOrchestratorConfigMapping(t *testing.T) {
 	qt.Check(t, qt.Equals(oc.EIDScanDeadline, 90*time.Second))
 	qt.Check(t, qt.Equals(oc.TSAAccessCert, "base64-cert"))
 	qt.Check(t, qt.IsTrue(oc.TSAAccessCertFlows.Has(job.FlowWebEID)))
-	qt.Check(t, qt.IsFalse(oc.TSAAccessCertFlows.Has(job.FlowCSC)))
+	qt.Check(t, qt.IsFalse(oc.TSAAccessCertFlows.Has(job.FlowCSCEidScan)))
 }
 
 // The deprecated spelling keeps working while it lives, and the new one wins.

@@ -99,14 +99,6 @@ func TestCSCEnabledAndBase(t *testing.T) {
 	qt.Check(t, qt.IsNotNil(c.HTTP.CheckRedirect))
 }
 
-func TestCSCEIDFlows(t *testing.T) {
-	none := New(Config{}, nil)
-	qt.Check(t, qt.HasLen(none.CSCEIDFlows(), 0))
-
-	both := New(Config{CSCACRValues: "urn:eparaksts:authentication:flow:mobile-eid | urn:eparaksts:authentication:flow:sc_plugin"}, nil)
-	qt.Check(t, qt.DeepEquals(both.CSCEIDFlows(), lvrtc.EIDFlows{lvrtc.EIDScan, lvrtc.CardOnComputer}))
-}
-
 // TestNewTrimsTrailingSlash confirms New() trims trailing slashes so endpoints
 // do not double up.
 func TestNewTrimsTrailingSlash(t *testing.T) {

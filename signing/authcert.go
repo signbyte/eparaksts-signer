@@ -30,9 +30,9 @@ import (
 // allFlows selects every signing flow.
 const allFlows = "all"
 
-// DefaultTSAAccessCertFlows is the shipped default — only the flow that has
-// never carried a signer certificate, so an existing deployment is unaffected.
-const DefaultTSAAccessCertFlows = string(job.FlowCSC)
+// DefaultTSAAccessCertFlows is the shipped default — only the CSC flows, whose
+// signings have never carried a signer certificate by default.
+const DefaultTSAAccessCertFlows = string(job.FlowCSCEidScan) + "," + string(job.FlowCSCEidPlugin)
 
 // FlowSet is the set of flows that finalize with the deployment's own
 // timestamping-access certificate.
@@ -101,7 +101,8 @@ func KnownFlowNames() []string {
 		string(job.FlowEParakstsMobile),
 		string(job.FlowEIDScan),
 		string(job.FlowEParakstsMobileEseal),
-		string(job.FlowCSC),
+		string(job.FlowCSCEidScan),
+		string(job.FlowCSCEidPlugin),
 	}
 }
 

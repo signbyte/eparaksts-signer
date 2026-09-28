@@ -14,24 +14,32 @@ import (
 )
 
 // Flow is the signing flow selected by the inbound `?flow=` query parameter.
-// One platform, two surfaces: csc rides the CSC API layer; eparakstsMobile/
+// One platform, two surfaces: cscEidScan / cscEidPlugin ride the CSC API layer; eparakstsMobile/
 // eidScan/eparakstsMobileEseal ride the existing TrustedX surface; webEid is the
 // local card (client-side). Each token is identical to the auth login_method
 // that authorizes it, so a login and the signing it drives correlate by name.
 type Flow string
 
 const (
-	FlowCSC                  Flow = "csc"                  // CSC API layer · signHash (default)
 	FlowWebEID               Flow = "webEid"               // local eID card via Web eID, client-side signing
 	FlowEParakstsMobile      Flow = "eparakstsMobile"      // TrustedX · eParaksts Mobile · server/raw
 	FlowEIDScan              Flow = "eidScan"              // TrustedX · eID NFC · device/raw + poll
 	FlowEParakstsMobileEseal Flow = "eparakstsMobileEseal" // TrustedX · qualified eSeal · server/raw
+	// The CSC API layer · signHash, one flow per way the eID card is read: by a
+	// phone (eID Scan), or in a card reader through the provider's browser extension.
+	FlowCSCEidScan   Flow = "cscEidScan"
+	FlowCSCEidPlugin Flow = "cscEidPlugin"
 )
+
+// IsCSC reports whether f signs through the CSC API layer.
+func (f Flow) IsCSC() bool {
+	return f == FlowCSCEidScan || f == FlowCSCEidPlugin
+}
 
 // Valid reports whether f is a known flow.
 func (f Flow) Valid() bool {
 	switch f {
-	case FlowCSC, FlowWebEID, FlowEParakstsMobile, FlowEIDScan, FlowEParakstsMobileEseal:
+	case FlowWebEID, FlowEParakstsMobile, FlowEIDScan, FlowEParakstsMobileEseal, FlowCSCEidScan, FlowCSCEidPlugin:
 		return true
 	default:
 		return false

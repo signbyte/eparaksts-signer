@@ -50,9 +50,6 @@ type Config struct {
 	CSCBaseURL      string
 	CSCClientID     string
 	CSCClientSecret string
-	// CSCACRValues names the eID flows offered during the CSC authorizations,
-	// "|"-separated; empty lets the provider offer its own choice.
-	CSCACRValues string
 
 	// IdentityFetchRetries / IdentityFetchDelay bound the sign_identities/{id}
 	// retry loop (identities may materialize asynchronously after first login).

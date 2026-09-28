@@ -16,8 +16,8 @@ import (
 	"github.com/signbyte/eparaksts-signer/job"
 )
 
-// cscFlow signs through the provider's CSC API layer. Two browser legs, both
-// confirmed by the person:
+// cscFlow signs through the provider's CSC API layer, one flow per way the
+// person's eID card is read (eid). Two browser legs, both confirmed by the person:
 //
 //  1. the credential registration: a short-term signing credential for this
 //     person, whose certificate then feeds CalculateDigest;
@@ -26,9 +26,14 @@ import (
 //
 // The worker then calls signHash once, verifies every returned value against the
 // credential's certificate, and hands the signatures to finalize.
-type cscFlow struct{ o *Orchestrator }
+type cscFlow struct {
+	o    *Orchestrator
+	flow job.Flow
+	// eid is how the eID card is read during both authorizations.
+	eid lvrtc.EIDFlow
+}
 
-func (f *cscFlow) Type() job.Flow { return job.FlowCSC }
+func (f *cscFlow) Type() job.Flow { return f.flow }
 
 func (f *cscFlow) Capabilities() Capabilities {
 	return Capabilities{SupportsBatch: true, Level: "QES"}
@@ -56,7 +61,7 @@ func (f *cscFlow) BeginAuthorization(ctx *azugo.Context, j *job.Job) (string, er
 		return "", err
 	}
 	j.PendingLeg = job.LegCredential
-	return f.push(ctx, lvrtc.CredentialRequest(f.o.entrust.CSCRedirectURI(), j.OAuthState, req, f.o.entrust.CSCEIDFlows()))
+	return f.push(ctx, lvrtc.CredentialRequest(f.o.entrust.CSCRedirectURI(), j.OAuthState, req, lvrtc.EIDFlows{f.eid}))
 }
 
 // newRequest mints the state and PKCE pair of one authorization and keeps them on
@@ -165,7 +170,7 @@ func (f *cscFlow) advanceCredential(ctx *azugo.Context, j *job.Job, c *csc.Clien
 		return "", false, err
 	}
 	j.PendingLeg = job.LegSign
-	next, err := f.push(ctx, lvrtc.SigningRequest(f.o.entrust.CSCRedirectURI(), j.OAuthState, req, f.o.entrust.CSCEIDFlows(),
+	next, err := f.push(ctx, lvrtc.SigningRequest(f.o.entrust.CSCRedirectURI(), j.OAuthState, req, lvrtc.EIDFlows{f.eid},
 		j.CredentialID, digests, hashOID))
 	if err != nil {
 		return "", false, err

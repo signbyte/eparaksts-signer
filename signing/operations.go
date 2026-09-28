@@ -91,7 +91,7 @@ func (o *Orchestrator) ArchiveUpload(ctx context.Context, correlationID, fileNam
 // ArchiveJobDocument adds an ARCHIVE_TIMESTAMP to a single READY document of an
 // existing job (B-LT → B-LTA, no re-upload) and returns the archived container
 // bytes. The auth certificate is the one captured on the job at signing time
-// (the signed-in user's auth cert; for csc, the flow's configured one) — no
+// (the signed-in user's auth cert, or the deployment's for the flows configured to use it) — no
 // config fallback here: the timestamp request is made in the signer's name.
 // ErrNoAuthCert when the job carries none. The job's SignAPI session is left
 // open (the job owns its lifecycle); the archived bytes are then also
