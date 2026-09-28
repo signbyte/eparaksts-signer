@@ -25,10 +25,10 @@ What an operator and a caller see:
 
 - **`?flow=` is required on `prepare`.** It used to fall back to `csc`; a request without it is now
   `400` with *flow is required*.
-- **`TSA_ACCESS_CERT_FLOWS` defaults to `cscEidScan,cscEidPlugin`** (was `csc`), so the deployment's own
-  timestamp certificate still covers exactly the CSC signings by default. A deployment that set
-  `TSA_ACCESS_CERT_FLOWS=csc` explicitly must rename it; the old name is reported at startup and selects
-  nothing.
+- **`TSA_ACCESS_CERT_FLOWS` defaults to no flow** (was `csc`): every flow, the CSC ones included, requests the
+  timestamp with the signer's own authentication certificate, the one captured at their login. A deployment that
+  pays for its own timestamps lists the flows it pays for. One that set `TSA_ACCESS_CERT_FLOWS=csc` explicitly must
+  rename it; the old name is reported at startup and selects nothing.
 - `CSC_BASE_URL` may be the provider's full CSC base (ending `/csc/v2`) or the part before it; unset, the
   CSC layer is the TrustedX host's `/trustedx-resources/csc/v2`.
 - A CSC `prepare` takes the person's **login authentication certificate** alone (`authCertificate`); it is

@@ -30,9 +30,11 @@ import (
 // allFlows selects every signing flow.
 const allFlows = "all"
 
-// DefaultTSAAccessCertFlows is the shipped default — only the CSC flows, whose
-// signings have never carried a signer certificate by default.
-const DefaultTSAAccessCertFlows = string(job.FlowCSCEidScan) + "," + string(job.FlowCSCEidPlugin)
+// DefaultTSAAccessCertFlows is the shipped default: no flow. Every flow, the CSC
+// ones included, finalizes with the signer's own authentication certificate,
+// captured at their login, so the timestamp is requested in their name. A
+// deployment that pays for its own timestamps lists the flows it pays for.
+const DefaultTSAAccessCertFlows = ""
 
 // FlowSet is the set of flows that finalize with the deployment's own
 // timestamping-access certificate.

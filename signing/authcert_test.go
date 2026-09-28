@@ -51,15 +51,13 @@ func TestParseFlowSetEmptySelectsNothing(t *testing.T) {
 	}
 }
 
-func TestDefaultFlowListSelectsOnlyTheFlowThatNeverCarriesASignerCertificate(t *testing.T) {
+func TestDefaultFlowListSelectsNoFlow(t *testing.T) {
 	set := ParseFlowSet(DefaultTSAAccessCertFlows)
-	for _, f := range []job.Flow{job.FlowCSCEidScan, job.FlowCSCEidPlugin} {
-		if !set.Has(f) {
-			t.Errorf("the default does not select %s — a CSC signing carries no signer certificate by default", f)
+	for _, f := range []job.Flow{job.FlowWebEID, job.FlowEIDScan, job.FlowEParakstsMobile, job.FlowEParakstsMobileEseal,
+		job.FlowCSCEidScan, job.FlowCSCEidPlugin} {
+		if set.Has(f) {
+			t.Errorf("the default selects %s — by default every flow requests the timestamp with the signer's own login certificate", f)
 		}
-	}
-	if set.Has(job.FlowWebEID) {
-		t.Error("the default selects webEid — the card flow must keep using the signer's own certificate")
 	}
 }
 
