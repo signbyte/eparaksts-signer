@@ -57,9 +57,9 @@ One spine, five flows. Each flow supplies only the variable step — *how the si
 | `eidScan` | TrustedX `device/raw` | eID sign identity | two-redirect (profile → use:device) + device push + verification code + poll | QES |
 | `eparakstsMobile` | TrustedX `server/raw/batch` | server sign identity | two-redirect (profile → use:server), batch-capable | QES |
 | `eparakstsMobileEseal` | TrustedX `server/raw/batch` | qualified e-seal identity | as `eparakstsMobile`, seal identity selected at the profile callback | SEAL |
-| `csc` (default) | CSC provider `signHash` | credential certificate chain | `oauth2code` consent + PKCE → credential token | QES |
+| `csc` (default) | CSC provider `signHash` | a short-term credential the provider issues for this signing | two pushed authorizations (a credential registration, then a signature authorization bound to the digests), each confirmed by the person | QES |
 
-`webEid` is **client-side**: there is no upstream authorization or signing call — the orchestrator computes the digests, hands them to the caller, and waits for the card's signature to be submitted. The four remote flows bounce the browser through one or two authorize legs, then sign in the background worker. `eidScan` signs exactly one document per job (the device-push primitive is single-digest); the other remote flows are batch-capable. The `csc` flow is feature-gated: with no CSC client id configured, `POST /prepare?flow=csc` returns `501` rather than a broken half-flow, because parts of the CSC provider sequencing (the short-term credential mechanism, the signature-activation-data binding, asynchronous polling) depend on an upstream platform update; the known request/response shapes are implemented and the residual items are marked at their call sites.
+`webEid` is **client-side**: there is no upstream authorization or signing call — the orchestrator computes the digests, hands them to the caller, and waits for the card's signature to be submitted. The four remote flows bounce the browser through one or two authorize legs, then sign in the background worker. `eidScan` signs exactly one document per job (the device-push primitive is single-digest); the other remote flows are batch-capable. The `csc` flow speaks the Cloud Signature Consortium API through the [`go-csc`](https://github.com/gmb-lib/go-csc) client and its eParaksts profile. The first leg registers a short-term signing credential for the person; its certificate feeds `CalculateDigest`; the second leg is a signature authorization bound to exactly those digests, whose token is the only authorization `signHash` accepts. Before the person is asked to confirm, the credential must stay valid long enough to finish (the provider reuses a credential for fifteen minutes after its first registration); before finalize, every returned value is verified against the credential's certificate; a refused `signHash` is never retried, because the provider spends the person's confirmation on it. With no CSC client id configured, `POST /prepare?flow=csc` returns `501`.
 
 ### Job state machine
 
@@ -209,7 +209,7 @@ The service never holds a signing private key — the key lives in the QSCD (car
 
 The conversion is exercised in both encodings and both branches: the card path (`webEid`) arrives as P1363 and is converted; the TrustedX path arrives as DER and passes through. The input encoding is logged per document (a signature value is public, not a secret), and a raw P1363 value arriving from a non-card flow is flagged as encoding telemetry. The Latvian eID signing key is P-384, so its digest is a 48-byte SHA-384 value.
 
-**Certificates — signing vs authentication.** Two certificates are distinct and never interchanged: the **signing** certificate feeds `CalculateDigest` (it binds the person's key into the data-to-be-signed), while the **authentication** certificate is the finalize `authCertificate` used by SignAPI for timestamp-authority access. For `webEid` the caller supplies both; for the TrustedX flows both are resolved from the person's sign identities; for `csc` the credential's leaf serves as both unless a service certificate is configured. Passing the signing certificate where the auth certificate belongs is rejected by the timestamp authority.
+**Certificates — signing vs authentication.** Two certificates are distinct and never interchanged: the **signing** certificate feeds `CalculateDigest` (it binds the person's key into the data-to-be-signed), while the **authentication** certificate is the finalize `authCertificate` used by SignAPI for timestamp-authority access. For `webEid` the caller supplies both; for the TrustedX flows both are resolved from the person's sign identities; for `csc` the signing certificate is the short-term credential's, and the authentication certificate is the one captured at the person's login, when the caller supplies it (or the deployment's own, for the flows `TSA_ACCESS_CERT_FLOWS` names). Passing the signing certificate where the auth certificate belongs is rejected by the timestamp authority.
 
 **Upstream tokens.** A process-wide TrustedX **introspect token** (client-credentials, ~600 s, cached and refreshed early) is the Bearer for every SignAPI call. The per-flow OAuth tokens (profile / signing / CSC credential) are **job-scoped**, held in Redis only for the job's TTL, never logged, and never returned to the caller. The `eidScan` device verification code is derived deterministically from the digest — `SHA-256(digest)` → last two bytes mod 10000, zero-padded to four digits — so the code shown on the phone matches the digest being signed.
 
@@ -252,7 +252,8 @@ Standard platform env (`SERVICE_NAME`, `ENVIRONMENT`, `SERVER_URLS`, `LOG_*`, `O
 | `TX_ACR_MOBILE`, `TX_ACR_EIDSCAN`, `TX_ACR_CLOUDESEAL` | eParaksts flow URNs | Per-flow `acr_values` |
 | `TX_IDENTITY_FETCH_RETRIES`, `TX_IDENTITY_FETCH_DELAY` | `5`, `2s` | Retry loop while sign identities materialize after login |
 | `EIDSCAN_POLL_INTERVAL`, `EIDSCAN_SIGN_DEADLINE` | `2s`, `120s` | Device-push poll cadence + signing deadline (`eidScan`) |
-| `CSC_BASE_URL`, `CSC_CLIENT_ID`, `CSC_CLIENT_SECRET` (`_FILE`) | — | CSC provider surface; unset `CSC_CLIENT_ID` ⇒ `csc` flow returns `501` |
+| `CSC_BASE_URL`, `CSC_CLIENT_ID`, `CSC_CLIENT_SECRET` (`_FILE`) | — | CSC provider surface. The base ends in `/csc/v2` (appended when missing); unset, it is the TrustedX host's `/trustedx-resources/csc/v2`. Unset `CSC_CLIENT_ID` ⇒ `csc` flow returns `501` |
+| `CSC_ACR_VALUES` | — | The eID flows the CSC authorizations offer, `|`-separated (`urn:eparaksts:authentication:flow:sc_plugin` for the card in a reader, `…:mobile-eid` for eID Scan). Unset, the provider offers its own choice |
 | `TSA_ACCESS_CERT` (`_FILE`) | — | This deployment's own timestamping-access certificate (base64, one line). Used as the finalize `authCertificate` for the flows in `TSA_ACCESS_CERT_FLOWS`, so those timestamps are billed to this deployment rather than to the signer |
 | `TSA_ACCESS_CERT_FLOWS` | `csc` | Which flows use it: `all`, or a comma-separated list of flow names (`webEid`, `eparakstsMobile`, `eidScan`, `eparakstsMobileEseal`, `csc`). Every other flow uses the signer's own authentication certificate, and is refused if the request supplies none. An unrecognized name is reported at startup and selects nothing |
 | `CSC_AUTH_CERT` (`_FILE`) | — | **Deprecated** — the former spelling of `TSA_ACCESS_CERT`, read only while that is unset |
@@ -303,13 +304,14 @@ eparaksts-signer/
 │   └── request/, response/        — inbound / outbound DTOs
 ├── signing/                       — the orchestrator + the flow seam
 │   ├── orchestrator.go            — shared spine (sessions → digest → sign → finalize → deliver)
-│   ├── flow.go, flows.go          — Flow interface + eid / csc / TrustedX implementations
+│   ├── flow.go, flows.go          — Flow interface + eid / TrustedX implementations
+│   ├── csc.go                     — the csc flow (two authorizations, signHash, verification)
 │   ├── ecdsa.go                   — P1363 ↔ DER normalization at the finalize boundary
 │   ├── operations.go              — stateless validate + archive-timestamp operations
 │   └── worker.go                  — background signing worker (Redis work queue)
 ├── job/                           — job aggregate, flow-aware state machine, Redis store + queue
 ├── signapi/                       — typed SignAPI client (the shared spine) + wire types
-├── entrust/                       — eParaksts platform client: introspect token, TrustedX, CSC,
+├── entrust/                       — eParaksts platform client: introspect token, TrustedX, the CSC client,
 │                                    identity selection, eidScan verification code
 ├── audit/                         — three-regime recorder, pseudonymizer, outbox drain tasks
 ├── Dockerfile                     — static build → rootless scratch (nonroot)
@@ -335,7 +337,7 @@ gofmt -l .            # must print nothing
 docker build -t eparaksts-signer .
 ```
 
-The unit suite runs against in-process fakes and covers the parts that must not be trusted to luck: the ECDSA normalization on P-256/P-384 in both encodings, the state-machine transitions, the SignAPI client's retry/verbatim-relay behaviour, TrustedX identity selection, the eidScan verification code, and the CSC request shapes. A live end-to-end signature additionally needs real eParaksts client credentials and a reachable SignAPI base; `LOG_LEVEL=debug` surfaces the SignAPI request/response and the upstream HTTP traces (bodies that carry certificates/digests are logged; Bearer tokens and document bytes never are).
+The unit suite runs against in-process fakes and covers the parts that must not be trusted to luck: the ECDSA normalization on P-256/P-384 in both encodings, the state-machine transitions, the SignAPI client's retry/verbatim-relay behaviour, TrustedX identity selection, the eidScan verification code, and the CSC flow (the two authorizations against a fake provider, an authorization for other digests refused, a signature that does not verify refused, an expiring credential refused). A live end-to-end signature additionally needs real eParaksts client credentials and a reachable SignAPI base; `LOG_LEVEL=debug` surfaces the SignAPI request/response and the upstream HTTP traces (bodies that carry certificates/digests are logged; Bearer tokens and document bytes never are).
 
 ---
 
@@ -354,7 +356,7 @@ The unit suite runs against in-process fakes and covers the parts that must not 
 
 ## Known limitations
 
-- **`csc` remote signing is feature-gated.** The known request/response shapes are implemented, but the short-term credential mechanism, the signature-activation-data binding, asynchronous polling, and the provider's ECDSA encoding depend on an upstream platform update; until a CSC client id is configured, `prepare?flow=csc` returns `501`. The DER normalization at finalize already makes either provider encoding safe.
+- **`csc` remote signing is off until configured.** Until a CSC client id is set, `prepare?flow=csc` returns `501`. One ASiC-E document per signing is the shape proven against the provider; PDF, co-signing and several documents at once use the same code but have not been walked against it.
 - **`eparakstsMobile` / `eparakstsMobileEseal`** share the proven TrustedX machinery (two-redirect, identity selection, finalize) with server-raw batch signing; they are high-confidence but warrant a confirmation run.
 - **One document → one signature per session** in this version. Bundling several documents under a single ASiC-E signature (beyond co-signing an existing container) is a follow-up.
 - **Cloud e-seal identity ambiguity** for `eparakstsMobileEseal` is detectable only at the profile callback (identities are known only after login), not at prepare time.

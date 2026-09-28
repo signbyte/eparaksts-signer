@@ -3,6 +3,31 @@
 Notable changes to this service, newest first, per release. This file is written for whoever
 runs the service or integrates against it.
 
+## v0.3.0
+
+### Changed — the `csc` flow speaks the CSC API as the provider does
+
+The `csc` flow is rebuilt on the `go-csc` client library and its eParaksts profile, and now runs the
+provider's real sequence: a **credential registration** that returns a short-term signing credential,
+then a **signature authorization bound to the exact digests**, each confirmed by the person in the
+browser, then `signHash` with that authorization's token. Before the person confirms, the credential
+must stay valid for two more minutes; before finalize, each returned value is verified against the
+credential's certificate; a refused `signHash` is not retried. The `signAlgo` sent is an OID chosen
+from the credential's own key algorithms, never the signing API's algorithm name. The previous flow
+could not complete against a CSC-conformant service.
+
+What an operator sees:
+
+- `CSC_BASE_URL` may be the provider's full CSC base (ending `/csc/v2`) or the part before it; unset,
+  the CSC layer is the TrustedX host's `/trustedx-resources/csc/v2`.
+- **New `CSC_ACR_VALUES`**: the eID flows the CSC authorizations offer (`|`-separated URNs). Unset, the
+  provider offers its own choice.
+- A `csc` `prepare` now takes the person's **login authentication certificate** alone
+  (`authCertificate`); it is what the timestamp is requested with unless `TSA_ACCESS_CERT_FLOWS` names
+  `csc` (its default, unchanged).
+- New failure reasons on a `csc` job: the short-term certificate expires too soon to finish, the
+  signature authorization is not for these documents, a returned signature does not verify.
+
 ## v0.2.0
 
 ### Added — choose whose certificate requests the timestamp, per signing flow

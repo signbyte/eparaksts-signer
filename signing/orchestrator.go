@@ -24,7 +24,7 @@ var (
 	ErrUnknownFlow    = errors.New("signing: unknown flow")
 	ErrNotClientFlow  = errors.New("signing: not a client-signature flow")
 	ErrWrongState     = errors.New("signing: job not in the expected state")
-	ErrCSCNotEnabled  = errors.New("signing: csc flow not enabled (blocked on the LVRTC platform update)")
+	ErrCSCNotEnabled  = errors.New("signing: csc flow not enabled (no CSC client configured)")
 	ErrBatchUnsupport = errors.New("signing: batch not supported for this flow")
 	ErrMixedFormat    = errors.New("signing: mixed-format batch not supported")
 	ErrNoAuthCert     = errors.New("signing: no auth certificate (supply the signed-in user's authCertificate)")
@@ -184,7 +184,14 @@ func (o *Orchestrator) Prepare(ctx *azugo.Context, in PrepareInput) (*PrepareRes
 		// (captured at their login); the flow then skips its own identity
 		// resolution. Only a complete set is taken — anything missing and the
 		// flow resolves identities itself, exactly as without a caller supply.
-		if in.SignIdentityID != "" && in.SigningCert != "" && in.AuthCert != "" {
+		//
+		// csc takes only the authentication certificate: its signing credential is
+		// minted for this signing, and the login's authentication certificate is what
+		// the timestamp can be requested with.
+		switch {
+		case in.Flow == job.FlowCSC:
+			j.AuthCert = in.AuthCert
+		case in.SignIdentityID != "" && in.SigningCert != "" && in.AuthCert != "":
 			j.SignIdentityID = in.SignIdentityID
 			j.SigningCert = in.SigningCert
 			j.AuthCert = in.AuthCert

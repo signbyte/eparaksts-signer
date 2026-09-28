@@ -60,10 +60,13 @@ type Configuration struct {
 	TXACREIDScan    string `mapstructure:"tx_acr_eidscan"`
 	TXACRCloudEseal string `mapstructure:"tx_acr_cloudeseal"`
 
-	// --- CSC API layer (csc) — partly open (items E/F/Cert) ---
+	// --- CSC API layer (csc) ---
 	CSCBaseURL      string `mapstructure:"csc_base_url" validate:"omitempty,url"`
 	CSCClientID     string `mapstructure:"csc_client_id"`
 	CSCClientSecret string `mapstructure:"csc_client_secret"`
+	// CSCACRValues names the eID flows the CSC authorizations offer (the provider's
+	// acr_values, "|"-separated). Empty: the provider offers its own choice.
+	CSCACRValues string `mapstructure:"csc_acr_values"`
 	// CSCAuthCert is the deprecated spelling of TSAAccessCert, kept for one
 	// release: it is read only when TSA_ACCESS_CERT is unset.
 	CSCAuthCert string `mapstructure:"csc_auth_cert"`
@@ -182,6 +185,7 @@ func (c *Configuration) Bind(_ string, v *viper.Viper) {
 	_ = v.BindEnv("csc_base_url", "CSC_BASE_URL")
 	_ = v.BindEnv("csc_client_id", "CSC_CLIENT_ID")
 	_ = v.BindEnv("csc_client_secret", "CSC_CLIENT_SECRET")
+	_ = v.BindEnv("csc_acr_values", "CSC_ACR_VALUES")
 	_ = v.BindEnv("csc_auth_cert", "CSC_AUTH_CERT")
 	_ = v.BindEnv("tx_identity_fetch_retries", "TX_IDENTITY_FETCH_RETRIES")
 	_ = v.BindEnv("tx_identity_fetch_delay", "TX_IDENTITY_FETCH_DELAY")
@@ -266,6 +270,7 @@ func (c *Configuration) EntrustConfig() entrust.Config {
 		CSCBaseURL:           c.CSCBaseURL,
 		CSCClientID:          c.CSCClientID,
 		CSCClientSecret:      c.CSCClientSecret,
+		CSCACRValues:         c.CSCACRValues,
 		IdentityFetchRetries: c.IdentityFetchRetries,
 		IdentityFetchDelay:   c.IdentityFetchDelay,
 	}

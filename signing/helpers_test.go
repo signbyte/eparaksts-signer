@@ -4,7 +4,6 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
@@ -147,24 +146,6 @@ func TestSignapiDocDigestAlgo(t *testing.T) {
 	qt.Check(t, qt.Equals(signapiDocDigestAlgo("SHA256"), "SHA256"))
 	// Empty defaults to SHA256 (the only value SignAPI supports for the doc digest).
 	qt.Check(t, qt.Equals(signapiDocDigestAlgo(""), "SHA256"))
-}
-
-// TestPKCE mints a 32-byte verifier and an S256 challenge derived from it, and
-// produces a fresh verifier on each call.
-func TestPKCE(t *testing.T) {
-	v, ch, err := pkce()
-	qt.Assert(t, qt.IsNil(err))
-
-	raw, err := base64.RawURLEncoding.DecodeString(v)
-	qt.Assert(t, qt.IsNil(err))
-	qt.Check(t, qt.Equals(len(raw), 32))
-
-	sum := sha256.Sum256([]byte(v))
-	qt.Check(t, qt.Equals(ch, base64.RawURLEncoding.EncodeToString(sum[:])))
-
-	v2, _, err := pkce()
-	qt.Assert(t, qt.IsNil(err))
-	qt.Check(t, qt.IsFalse(v == v2))
 }
 
 // TestSubstituteJobID replaces every {jobId} placeholder.

@@ -7,7 +7,11 @@
 // which is what makes the callback/worker split and horizontal scaling safe.
 package job
 
-import "time"
+import (
+	"encoding/base64"
+	"fmt"
+	"time"
+)
 
 // Flow is the signing flow selected by the inbound `?flow=` query parameter.
 // One platform, two surfaces: csc rides the CSC API layer; eparakstsMobile/
@@ -152,8 +156,8 @@ type OAuthLeg int
 const (
 	LegNone       OAuthLeg = iota
 	LegProfile             // TrustedX redirect #1 (profile) — pending
-	LegSign                // TrustedX redirect #2 (sign-consent) — pending
-	LegCredential          // CSC credential-auth leg — pending
+	LegSign                // the signature authorization (TrustedX sign-consent; the CSC hash-bound authorization) — pending
+	LegCredential          // the CSC credential registration — pending
 )
 
 // Job is the signing-job aggregate persisted in Redis.
@@ -176,9 +180,13 @@ type Job struct {
 
 	// SignatureQualifier requested (e.g. eu_eidas_qes). csc credential selection.
 	SignatureQualifier string `json:"signature_qualifier,omitempty"`
-	// SignAlgo is the batch signature algorithm echoed from CalculateDigest
-	// (the `signature_algorithm` field), echoed verbatim to the signer (SCAL2).
+	// SignAlgo is the batch signature algorithm: echoed from CalculateDigest
+	// (the `signature_algorithm` field) to the TrustedX signer; for csc, the OID
+	// chosen from the credential's own key algorithms.
 	SignAlgo string `json:"sign_algo,omitempty"`
+	// HashAlgorithmOID is the digest algorithm of the batch (csc): the one the
+	// signature authorization and signHash name.
+	HashAlgorithmOID string `json:"hash_algorithm_oid,omitempty"`
 	// DigestsSummary / DigestsSummaryAlgo are the internal SAD-like value (and its
 	// `algorithm`, e.g. SHA256) bound in the TrustedX sign-consent redirect. Not
 	// used by csc, never exposed to the caller.
@@ -196,18 +204,19 @@ type Job struct {
 	OAuthState string `json:"oauth_state,omitempty"`
 	// PendingLeg is which redirect leg the next /callback completes.
 	PendingLeg OAuthLeg `json:"pending_leg,omitempty"`
-	// PKCEVerifier for the csc oauth2code exchange.
+	// PKCEVerifier for the pending csc authorization's code exchange.
 	PKCEVerifier string `json:"pkce_verifier,omitempty"`
 
 	// TrustedX selection (resolved after redirect #1).
 	SignIdentityID string `json:"sign_identity_id,omitempty"`
 	// SigningCert / AuthCert are base64-DER. SigningCert feeds CalculateDigest;
 	// AuthCert is the SignAPI finalize authCertificate (the person's auth cert for
-	// TrustedX flows; config-supplied for csc; the card cert for eid).
+	// TrustedX flows; the login's authentication certificate for csc; the card cert
+	// for eid).
 	SigningCert string `json:"signing_cert,omitempty"`
 	AuthCert    string `json:"auth_cert,omitempty"`
 
-	// CSC selection.
+	// CredentialID is the short-term CSC credential the registration returned.
 	CredentialID string `json:"credential_id,omitempty"`
 
 	// Tokens are job-scoped and short-lived (≤600 s upstream token lifetime).
@@ -232,6 +241,19 @@ type Job struct {
 
 	// Err is the job-level failure (interim: finalize is all-or-nothing, Q G).
 	Err *Error `json:"err,omitempty"`
+}
+
+// Digests returns the documents' digests decoded, in document order.
+func (j *Job) Digests() ([][]byte, error) {
+	out := make([][]byte, len(j.Documents))
+	for i := range j.Documents {
+		d, err := base64.StdEncoding.DecodeString(j.Documents[i].Digest)
+		if err != nil {
+			return nil, fmt.Errorf("job: document %q digest: %w", j.Documents[i].DocumentID, err)
+		}
+		out[i] = d
+	}
+	return out, nil
 }
 
 // Transition moves the job to a new state if the transition is valid, stamping
