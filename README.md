@@ -357,7 +357,7 @@ The unit suite runs against in-process fakes and covers the parts that must not 
 
 ## Known limitations
 
-- **CSC remote signing is off until configured.** Until a CSC client id is set, `prepare?flow=cscEidScan` and `prepare?flow=cscEidPlugin` return `501`. One ASiC-E document per signing is the shape proven against the provider; PDF, co-signing and several documents at once use the same code but have not been walked against it.
+- **CSC remote signing is off until configured.** Until a CSC client id is set, `prepare?flow=cscEidScan` and `prepare?flow=cscEidPlugin` return `501`. One ASiC-E document per signing is the shape walked against the provider. Several documents in one authorization, PDF (PAdES) and a further signature on a signed container run the same code and are covered by this service's tests, but have not been walked against it. The one open question is the provider's answer to SHA-256: every document sent as a digest (the hash-only path, which a further signature on a container always takes) is signed over a SHA-256 digest, whatever the key, and the provider has so far been measured with SHA-384 only.
 - **`eparakstsMobile` / `eparakstsMobileEseal`** share the proven TrustedX machinery (two-redirect, identity selection, finalize) with server-raw batch signing; they are high-confidence but warrant a confirmation run.
 - **One document → one signature per session** in this version. Bundling several documents under a single ASiC-E signature (beyond co-signing an existing container) is a follow-up.
 - **Cloud e-seal identity ambiguity** for `eparakstsMobileEseal` is detectable only at the profile callback (identities are known only after login), not at prepare time.

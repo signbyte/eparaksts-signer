@@ -57,7 +57,7 @@ func newFakeCSC(t *testing.T) (*fakeCSC, *httptest.Server) {
 }
 
 func (f *fakeCSC) mint() {
-	tpl := &x509.Certificate{SerialNumber: big.NewInt(7), Subject: pkix.Name{CommonName: "CSC SIGNER", SerialNumber: "PNOLV-010180-15097"},
+	tpl := &x509.Certificate{SerialNumber: big.NewInt(7), Subject: pkix.Name{CommonName: "CSC SIGNER", SerialNumber: testIDCode()},
 		NotBefore: time.Now().Add(-time.Minute), NotAfter: time.Now().Add(f.certUntil), KeyUsage: x509.KeyUsageContentCommitment}
 	der, _ := x509.CreateCertificate(rand.Reader, tpl, tpl, f.key.Public(), f.key)
 	f.cert, _ = x509.ParseCertificate(der)
@@ -210,7 +210,7 @@ func TestCSCFlowTwoAuthorizationsThenVerifiedSignature(t *testing.T) {
 	qt.Check(t, qt.Equals(int(j.PendingLeg), int(job.LegSign)))
 	qt.Check(t, qt.Equals(j.CredentialID, "cred-1"))
 	qt.Check(t, qt.Equals(j.SigningCert, base64.StdEncoding.EncodeToString(fake.cert.Raw)))
-	qt.Check(t, qt.Equals(j.SubjectRef, "PNOLV-010180-15097"))
+	qt.Check(t, qt.Equals(j.SubjectRef, testIDCode()))
 	qt.Check(t, qt.Equals(j.HashAlgorithmOID, csc.OIDSHA384))
 	qt.Check(t, qt.Equals(j.SignAlgo, csc.OIDECDSAWithSHA384)) // an OID from key/algo, never SignAPI's name
 	sign := fake.pushed[1]
