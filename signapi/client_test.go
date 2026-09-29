@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"mime"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -437,10 +439,10 @@ func heldFirstTry(counts map[string]*atomic.Int32, answer func(w http.ResponseWr
 	}
 }
 
-// TestQuickCallsRetryAHeldFirstTry: the provider sometimes holds a request without
-// answering and answers the next at once. A quick call gives up on its first try
-// after the first-attempt wait and asks again, instead of waiting out the full
-// attempt limit.
+// TestQuickCallsRetryAHeldFirstTry: a session start the provider cannot serve answers
+// an error only after about a minute, and the next start is served at once. A quick
+// call gives up on its first try after the first-attempt wait and asks again,
+// instead of waiting out the full attempt limit.
 func TestQuickCallsRetryAHeldFirstTry(t *testing.T) {
 	calls := map[string]func(c *Client) error{
 		"/api-session/v1.0/start": func(c *Client) error { _, err := c.StartSession(context.Background(), "corr"); return err },
@@ -448,10 +450,6 @@ func TestQuickCallsRetryAHeldFirstTry(t *testing.T) {
 			return c.CloseSession(context.Background(), "corr", "s1")
 		},
 		"/api-storage/v1.0/s1/list": func(c *Client) error { _, err := c.List(context.Background(), "corr", "s1"); return err },
-		"/api-sign/v1.0/CalculateDigest": func(c *Client) error {
-			_, err := c.CalculateDigest(context.Background(), "corr", CalculateDigestRequest{})
-			return err
-		},
 		"/api-storage/v1.0/s1/f1": func(c *Client) error {
 			_, err := c.Download(context.Background(), "corr", "s1", "f1", false)
 			return err
@@ -529,4 +527,119 @@ func TestFirstAttemptDefault(t *testing.T) {
 	qt.Check(t, qt.Equals(New("http://signapi.test", tok, nil).firstWait, 10*time.Second))
 	qt.Check(t, qt.Equals(New("http://signapi.test", tok, nil, WithFirstAttempt(0)).firstWait, 10*time.Second))
 	qt.Check(t, qt.Equals(New("http://signapi.test", tok, nil, WithFirstAttempt(3*time.Second)).firstWait, 3*time.Second))
+	qt.Check(t, qt.Equals(New("http://signapi.test", tok, nil).callLimit, 60*time.Second))
+	qt.Check(t, qt.Equals(New("http://signapi.test", tok, nil, WithCallLimit(0)).callLimit, 60*time.Second))
+	qt.Check(t, qt.Equals(New("http://signapi.test", tok, nil, WithCallLimit(5*time.Second)).callLimit, 5*time.Second))
+}
+
+// patientCalls are the calls that are waited on: each answers {"data":{}} on success.
+var patientCalls = map[string]func(c *Client) error{
+	"CalculateDigest": func(c *Client) error {
+		_, err := c.CalculateDigest(context.Background(), "corr", CalculateDigestRequest{})
+		return err
+	},
+	"finalizeSigning": func(c *Client) error { return c.FinalizeSigning(context.Background(), "corr", FinalizeRequest{}) },
+	"addArchive":      func(c *Client) error { return c.AddArchiveTimestamp(context.Background(), "corr", "s1", "CERT") },
+	"validate": func(c *Client) error {
+		_, _, err := c.Validate(context.Background(), "corr", "s1", "d1")
+		return err
+	},
+}
+
+// TestPatientCallsWaitAndAreNeverAskedTwice: the provider serves these synchronously
+// and keeps working on a request its caller gave up on. They wait past the quick
+// first-try wait for their answer, and a call that outlasts the patient limit fails
+// without being asked a second time.
+func TestPatientCallsWaitAndAreNeverAskedTwice(t *testing.T) {
+	for name, call := range patientCalls {
+		t.Run(name+"/slow answer waited for", func(t *testing.T) {
+			var n atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.Copy(io.Discard, r.Body)
+				n.Add(1)
+				time.Sleep(300 * time.Millisecond)
+				_, _ = io.WriteString(w, `{"data":{}}`)
+			}))
+			t.Cleanup(srv.Close)
+			c := New(srv.URL, func(context.Context) (string, error) { return testToken, nil }, zap.NewNop(),
+				WithFirstAttempt(50*time.Millisecond), WithCallLimit(5*time.Second))
+			qt.Assert(t, qt.IsNil(call(c)))
+			qt.Check(t, qt.Equals(n.Load(), int32(1)))
+		})
+		t.Run(name+"/past the limit, asked once", func(t *testing.T) {
+			var n atomic.Int32
+			release := make(chan struct{})
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.Copy(io.Discard, r.Body)
+				n.Add(1)
+				select {
+				case <-r.Context().Done():
+				case <-release:
+				}
+			}))
+			t.Cleanup(func() { close(release); srv.Close() })
+			c := New(srv.URL, func(context.Context) (string, error) { return testToken, nil }, zap.NewNop(), WithCallLimit(200*time.Millisecond))
+			qt.Assert(t, qt.IsNotNil(call(c)))
+			qt.Check(t, qt.Equals(n.Load(), int32(1)))
+		})
+	}
+}
+
+// TestPatientCallsRetryOnlyWhatWasNotTaken: a 502 or 503 means nothing behind the
+// proxy took the request, so a patient call may ask again; a 504 (the proxy gave up
+// while the provider may still be working) and any other answer end it. finalize and
+// the archive timestamp are never asked again at all.
+func TestPatientCallsRetryOnlyWhatWasNotTaken(t *testing.T) {
+	cases := []struct {
+		first     int
+		wantCalls int32
+		wantOK    bool
+	}{
+		{http.StatusServiceUnavailable, 2, true},
+		{http.StatusBadGateway, 2, true},
+		{http.StatusGatewayTimeout, 1, false},
+		{http.StatusInternalServerError, 1, false},
+	}
+	for _, name := range []string{"CalculateDigest", "validate"} {
+		for _, tc := range cases {
+			t.Run(fmt.Sprintf("%s/%d", name, tc.first), func(t *testing.T) {
+				var n atomic.Int32
+				c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+					if n.Add(1) == 1 {
+						w.WriteHeader(tc.first)
+						return
+					}
+					_, _ = io.WriteString(w, `{"data":{}}`)
+				})
+				err := patientCalls[name](c)
+				qt.Check(t, qt.Equals(err == nil, tc.wantOK), qt.Commentf("err %v", err))
+				qt.Check(t, qt.Equals(n.Load(), tc.wantCalls))
+			})
+		}
+	}
+	for _, name := range []string{"finalizeSigning", "addArchive"} {
+		t.Run(name+"/503 not asked again", func(t *testing.T) {
+			var n atomic.Int32
+			c := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
+				n.Add(1)
+				w.WriteHeader(http.StatusServiceUnavailable)
+			})
+			qt.Assert(t, qt.IsNotNil(patientCalls[name](c)))
+			qt.Check(t, qt.Equals(n.Load(), int32(1)))
+		})
+	}
+}
+
+// TestPatientCallRetriesAConnectionNeverMade: a refused connection sent nothing, so
+// it is asked again (and here fails again: nothing listens).
+func TestPatientCallRetriesAConnectionNeverMade(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	addr := srv.URL
+	srv.Close()
+	_, _, err := New(addr, func(context.Context) (string, error) { return testToken, nil }, zap.NewNop()).patientCall(context.Background(), http.MethodGet, "/x", "corr", nil, "")
+	qt.Assert(t, qt.IsNotNil(err))
+	var op *net.OpError
+	qt.Check(t, qt.IsTrue(errors.As(err, &op) && op.Op == "dial"))
+	qt.Check(t, qt.IsTrue(notTaken(0, err)))
+	qt.Check(t, qt.IsFalse(notTaken(0, context.DeadlineExceeded)))
 }

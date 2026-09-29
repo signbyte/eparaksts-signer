@@ -627,9 +627,9 @@ func (o *Orchestrator) closeSessions(j *job.Job) {
 const sessionCloseLimit = 2 * time.Minute
 
 // closeLater closes SignAPI sessions in the background, so a close never holds back
-// the answer, the saved state or the next job before it. The provider sometimes
-// holds a request without answering; a close is best effort, and a session left
-// open expires on the provider's side after a day. The closes run on their own
+// the answer, the saved state or the next job before it. A close the provider
+// cannot serve answers an error only after about a minute; a close is best effort,
+// and a session left open expires on the provider's side after a day. The closes run on their own
 // context: the caller's request context is recycled the moment it answers.
 func (o *Orchestrator) closeLater(correlationID string, sessionIDs ...string) {
 	var sids []string

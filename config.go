@@ -51,10 +51,14 @@ type Configuration struct {
 	// SignAPIBaseURL is the eParaksts SignAPI base (the shared document spine).
 	SignAPIBaseURL string `mapstructure:"signapi_base_url" validate:"omitempty,url"`
 	// SignAPIFirstAttempt is how long the first try of a quick SignAPI call (session
-	// start and close, CalculateDigest, list, download) waits for the answer to begin
-	// before it is retried: the provider sometimes holds a request without answering
-	// and answers the next one at once.
+	// start and close, list, download) waits for the answer to begin before it is
+	// retried: a start the provider cannot serve answers an error only after about a
+	// minute, and the next one is served at once.
 	SignAPIFirstAttempt time.Duration `mapstructure:"signapi_first_attempt" validate:"gt=0"`
+	// SignAPICallLimit is how long a patient SignAPI call (CalculateDigest, finalize,
+	// the archive timestamp, validation) waits for its own answer; it is never asked
+	// twice while the first may still be running.
+	SignAPICallLimit time.Duration `mapstructure:"signapi_call_timeout" validate:"gt=0"`
 
 	// --- TrustedX surface (mobile / eidScan / cloudEseal) ---
 	TXBaseURL       string `mapstructure:"tx_base_url" validate:"omitempty,url"`
@@ -176,6 +180,8 @@ func (c *Configuration) Bind(_ string, v *viper.Viper) {
 	_ = v.BindEnv("signapi_base_url", "SIGNAPI_BASE_URL")
 	v.SetDefault("signapi_first_attempt", signapi.DefaultFirstAttempt)
 	_ = v.BindEnv("signapi_first_attempt", "SIGNAPI_FIRST_ATTEMPT_TIMEOUT")
+	v.SetDefault("signapi_call_timeout", signapi.DefaultCallLimit)
+	_ = v.BindEnv("signapi_call_timeout", "SIGNAPI_CALL_TIMEOUT")
 	_ = v.BindEnv("tx_base_url", "TX_BASE_URL")
 	_ = v.BindEnv("tx_as_path", "TX_AS_PATH")
 	// TrustedX client credentials are the SAME eParaksts demo client authbyte-core

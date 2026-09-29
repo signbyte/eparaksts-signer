@@ -234,8 +234,8 @@ func answersWithin(t *testing.T, limit time.Duration, what string, call func() e
 	}
 }
 
-// TestValidateAnswersWhileItsSessionCloseIsHeld: the provider sometimes holds a
-// request without answering. The report goes back at once; the close finishes after.
+// TestValidateAnswersWhileItsSessionCloseIsHeld: a close the provider cannot serve
+// answers only after about a minute. The report goes back at once; the close after.
 func TestValidateAnswersWhileItsSessionCloseIsHeld(t *testing.T) {
 	o, closes, release := heldCloseSpine(t)
 	answersWithin(t, 3*time.Second, "the validation report", func() error {

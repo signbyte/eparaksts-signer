@@ -106,12 +106,16 @@ func TestNewConfiguration(t *testing.T) {
 }
 
 // The first-attempt wait of the quick SignAPI calls defaults to ten seconds and is
-// set with SIGNAPI_FIRST_ATTEMPT_TIMEOUT.
-func TestSignAPIFirstAttemptSetting(t *testing.T) {
+// set with SIGNAPI_FIRST_ATTEMPT_TIMEOUT; the patient calls' limit defaults to sixty
+// and is set with SIGNAPI_CALL_TIMEOUT.
+func TestSignAPIWaitSettings(t *testing.T) {
 	v := viper.New()
 	NewConfiguration().Bind("", v)
 	qt.Check(t, qt.Equals(v.GetDuration("signapi_first_attempt"), 10*time.Second))
+	qt.Check(t, qt.Equals(v.GetDuration("signapi_call_timeout"), 60*time.Second))
 
 	t.Setenv("SIGNAPI_FIRST_ATTEMPT_TIMEOUT", "4s")
+	t.Setenv("SIGNAPI_CALL_TIMEOUT", "90s")
 	qt.Check(t, qt.Equals(v.GetDuration("signapi_first_attempt"), 4*time.Second))
+	qt.Check(t, qt.Equals(v.GetDuration("signapi_call_timeout"), 90*time.Second))
 }

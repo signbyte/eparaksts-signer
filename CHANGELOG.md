@@ -5,18 +5,26 @@ runs the service or integrates against it.
 
 ## v0.3.0
 
-### Changed — a SignAPI request the provider holds costs about ten seconds, and never holds an answer
+### Changed — a SignAPI call is waited for or retried by what it does, and a close never holds an answer
 
-The provider sometimes holds a request without answering for 30 s or more and answers the next one at
-once. The first try of a quick call — session start and close, `CalculateDigest`, list, download — now
-gives up after **10 s** without an answer and asks again; before, every try waited 30 s. Set it with
-`SIGNAPI_FIRST_ATTEMPT_TIMEOUT`. Validation, uploads and digest uploads still wait the full 30 s: a
-long-term validation legitimately computes that long, and an upload adds to the session, so it is not
-repeated early.
+The provider serves every call synchronously and keeps working on a request its caller has given up on. So the
+calls now follow two rules:
 
-Closing a SignAPI session no longer holds anything back. A validation report and an archived document go
-back as soon as they are ready, a failed job's state is saved, and a deleted job is gone, before their
-sessions close; a close that fails leaves the session to expire on the provider's side.
+- **Quick calls** — session start and close, list, download — give up on a first try that has not begun to answer
+  within **10 s** and ask again. A session start the provider cannot serve answers an error only after about a minute
+  while the next one is served at once, and a quick call cut short leaves nothing behind. Set with
+  `SIGNAPI_FIRST_ATTEMPT_TIMEOUT`.
+- **Patient calls** — `CalculateDigest`, finalize, the archive timestamp, validation — wait up to **60 s** for their
+  own answer (`SIGNAPI_CALL_TIMEOUT`) and are never asked twice after a timeout: only a request the provider
+  certainly did not take (no connection made, or a `502`/`503`) is asked again, and finalize and the archive
+  timestamp never are. Before, `CalculateDigest` and validation were asked again after 30 s, which could leave the
+  provider preparing one session twice.
+
+Uploads and digest uploads keep their 30 s tries.
+
+Closing a SignAPI session no longer holds anything back. A validation report and an archived document go back as
+soon as they are ready, a failed job's state is saved, and a deleted job is gone, before their sessions close; a
+close that fails leaves the session to expire on the provider's side.
 
 ### Added — the service says which signing flows it runs
 
