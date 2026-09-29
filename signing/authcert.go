@@ -98,14 +98,12 @@ func UnknownFlowNames(list string) []string {
 // KnownFlowNames lists every flow name a flow list may carry, so a report about
 // an unrecognized one can say what was expected.
 func KnownFlowNames() []string {
-	return []string{
-		string(job.FlowWebEID),
-		string(job.FlowEParakstsMobile),
-		string(job.FlowEIDScan),
-		string(job.FlowEParakstsMobileEseal),
-		string(job.FlowCSCEidScan),
-		string(job.FlowCSCEidPlugin),
+	flows := job.Flows()
+	names := make([]string, len(flows))
+	for i, f := range flows {
+		names[i] = string(f)
 	}
+	return names
 }
 
 // CertSource says whose certificate a timestamp was requested with. It is the

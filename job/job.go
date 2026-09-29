@@ -36,6 +36,13 @@ func (f Flow) IsCSC() bool {
 	return f == FlowCSCEidScan || f == FlowCSCEidPlugin
 }
 
+// Flows lists every signing flow, in the order a caller is shown them.
+func Flows() []Flow {
+	return []Flow{
+		FlowWebEID, FlowEParakstsMobile, FlowEIDScan, FlowEParakstsMobileEseal, FlowCSCEidScan, FlowCSCEidPlugin,
+	}
+}
+
 // Valid reports whether f is a known flow.
 func (f Flow) Valid() bool {
 	switch f {

@@ -104,6 +104,32 @@ func New(jobs *job.Store, sa *signapi.Client, ent *entrust.Client, cfg Config, l
 // Flow returns the strategy for a flow value, or nil.
 func (o *Orchestrator) Flow(f job.Flow) Flow { return o.flows[f] }
 
+// Offered reports whether this deployment runs flow f. Every registered flow
+// runs wherever the service does — the signing API it depends on authenticates
+// with the same platform client the other remote flows use — except the CSC
+// flows, which need a CSC client of their own.
+func (o *Orchestrator) Offered(f job.Flow) bool {
+	if o.flows[f] == nil {
+		return false
+	}
+	if f.IsCSC() {
+		return o.entrust != nil && o.entrust.CSCEnabled()
+	}
+	return true
+}
+
+// OfferedFlows lists the flows this deployment runs, in the order a caller is
+// shown them. Prepare refuses exactly the flows missing from it.
+func (o *Orchestrator) OfferedFlows() []job.Flow {
+	var out []job.Flow
+	for _, f := range job.Flows() {
+		if o.Offered(f) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
 // Store exposes the job store (used by the worker + handlers).
 func (o *Orchestrator) Store() *job.Store { return o.jobs }
 
@@ -119,7 +145,7 @@ func (o *Orchestrator) Prepare(ctx *azugo.Context, in PrepareInput) (*PrepareRes
 	if err := validateBatch(in, caps); err != nil {
 		return nil, err
 	}
-	if in.Flow.IsCSC() && !o.entrust.CSCEnabled() {
+	if !o.Offered(in.Flow) {
 		return nil, ErrCSCNotEnabled
 	}
 

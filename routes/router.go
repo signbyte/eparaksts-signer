@@ -1,5 +1,5 @@
 // Package routes registers the eParaksts Signing Service inbound HTTP API.
-// All /api/v1/signatures/* endpoints are
+// All /api/v1/* endpoints are
 // service-to-service (Portal-API), gated by the go-authbyte DPoP middleware and
 // per-endpoint scopes — EXCEPT the OAuth callback, which is the only
 // browser-facing endpoint (secured by `state` + PKCE, not DPoP).
@@ -42,6 +42,7 @@ func Init(a *app.App) error {
 	// Service-to-service signing API (DPoP-gated).
 	api := a.Group("/api/v1")
 	api.Use(a.AuthMiddleware())
+	api.Get("/info", r.scoped(levelRead, r.info))
 	api.Post("/signatures/prepare", r.scoped(levelCreate, r.prepare))
 	api.Post("/signatures/{jobId}/signatures", r.scoped(levelWrite, r.submit))
 	api.Get("/signatures/{jobId}/status", r.scoped(levelRead, r.status))

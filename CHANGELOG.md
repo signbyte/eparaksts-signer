@@ -5,6 +5,21 @@ runs the service or integrates against it.
 
 ## v0.3.0
 
+### Added — the service says which signing flows it runs
+
+**`GET /api/v1/info` lists the signing flows this deployment runs**, so a caller can offer a person
+only those, instead of a method that would be refused. It takes the `signatures:read` scope. The two
+CSC flows appear only when a CSC client is configured; every other flow appears wherever the service
+runs. `prepare` refuses exactly the flows the list leaves out.
+
+```http
+GET /api/v1/info
+
+200 OK
+{ "flows": [ { "name": "webEid" }, { "name": "eparakstsMobile" }, { "name": "eidScan" },
+             { "name": "eparakstsMobileEseal" }, { "name": "cscEidScan" }, { "name": "cscEidPlugin" } ] }
+```
+
 ### Changed — the CSC flow is two flows, and speaks the CSC API as the provider does
 
 **The `csc` flow is gone; there are two in its place, named for how the person's eID card is read:
