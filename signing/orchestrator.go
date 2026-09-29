@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"azugo.io/azugo"
@@ -76,6 +77,8 @@ type Orchestrator struct {
 	cfg     Config
 	log     *zap.Logger
 	flows   map[job.Flow]Flow
+	// closing tracks the session closes still running after their caller answered.
+	closing sync.WaitGroup
 }
 
 // New builds the orchestrator and registers all flows.
@@ -369,8 +372,8 @@ func (o *Orchestrator) RunJob(ctx context.Context, jobID string) {
 		if err := flow.Sign(ctx, j); err != nil {
 			o.log.Warn("worker: sign failed", zap.String("job", j.JobID), zap.Error(err))
 			j.Fail("signing:sign_failed", err.Error())
-			o.closeSessions(ctx, j)
 			_ = o.jobs.Save(ctx, j)
+			o.closeSessions(j)
 			return
 		}
 		j.Transition(job.StateFinalizing)
@@ -380,8 +383,8 @@ func (o *Orchestrator) RunJob(ctx context.Context, jobID string) {
 		if err := o.finalize(ctx, j); err != nil {
 			o.log.Warn("worker: finalize failed", zap.String("job", j.JobID), zap.Error(err))
 			j.Fail("signapi:finalize_failed", err.Error())
-			o.closeSessions(ctx, j)
 			_ = o.jobs.Save(ctx, j)
+			o.closeSessions(j)
 			return
 		}
 		_ = o.jobs.Save(ctx, j)
@@ -435,8 +438,11 @@ func (o *Orchestrator) DeleteJob(ctx context.Context, jobID string) error {
 	if err != nil {
 		return err
 	}
-	o.closeSessions(ctx, j)
-	return o.jobs.Delete(ctx, j)
+	if err := o.jobs.Delete(ctx, j); err != nil {
+		return err
+	}
+	o.closeSessions(j)
+	return nil
 }
 
 // --- shared spine ------------------------------------------------------------
@@ -607,17 +613,48 @@ func (o *Orchestrator) finalize(ctx context.Context, j *job.Job) error {
 	return nil
 }
 
-// closeSessions closes every SignAPI session (best effort).
-func (o *Orchestrator) closeSessions(ctx context.Context, j *job.Job) {
+// closeSessions closes every SignAPI session of the job, after its caller has
+// moved on (closeLater).
+func (o *Orchestrator) closeSessions(j *job.Job) {
+	sids := make([]string, 0, len(j.Documents))
 	for i := range j.Documents {
-		sid := j.Documents[i].SessionID
-		if sid == "" {
-			continue
-		}
-		if err := o.signapi.CloseSession(ctx, j.JobID, sid); err != nil {
-			o.log.Warn("close session failed", zap.String("job", j.JobID), zap.String("session", sid), zap.Error(err))
+		sids = append(sids, j.Documents[i].SessionID)
+	}
+	o.closeLater(j.JobID, sids...)
+}
+
+// sessionCloseLimit bounds the closes of one closeLater call, all their tries included.
+const sessionCloseLimit = 2 * time.Minute
+
+// closeLater closes SignAPI sessions in the background, so a close never holds back
+// the answer, the saved state or the next job before it. The provider sometimes
+// holds a request without answering; a close is best effort, and a session left
+// open expires on the provider's side after a day. The closes run on their own
+// context: the caller's request context is recycled the moment it answers.
+func (o *Orchestrator) closeLater(correlationID string, sessionIDs ...string) {
+	var sids []string
+	for _, sid := range sessionIDs {
+		if sid != "" {
+			sids = append(sids, sid)
 		}
 	}
+	if len(sids) == 0 {
+		return
+	}
+	o.closing.Add(1)
+	go func() {
+		defer o.closing.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), sessionCloseLimit)
+		defer cancel()
+		for _, sid := range sids {
+			o.closeSession(ctx, correlationID, sid)
+		}
+	}()
+}
+
+// WaitClosing waits for the background session closes to finish.
+func (o *Orchestrator) WaitClosing() {
+	o.closing.Wait()
 }
 
 // --- helpers -----------------------------------------------------------------

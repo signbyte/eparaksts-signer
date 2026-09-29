@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/go-quicktest/qt"
+	"github.com/spf13/viper"
 
 	"github.com/signbyte/eparaksts-signer/job"
 )
@@ -102,4 +103,15 @@ func TestNewConfiguration(t *testing.T) {
 	c := NewConfiguration()
 	qt.Assert(t, qt.IsNotNil(c))
 	qt.Check(t, qt.IsNotNil(c.BaseConfiguration))
+}
+
+// The first-attempt wait of the quick SignAPI calls defaults to ten seconds and is
+// set with SIGNAPI_FIRST_ATTEMPT_TIMEOUT.
+func TestSignAPIFirstAttemptSetting(t *testing.T) {
+	v := viper.New()
+	NewConfiguration().Bind("", v)
+	qt.Check(t, qt.Equals(v.GetDuration("signapi_first_attempt"), 10*time.Second))
+
+	t.Setenv("SIGNAPI_FIRST_ATTEMPT_TIMEOUT", "4s")
+	qt.Check(t, qt.Equals(v.GetDuration("signapi_first_attempt"), 4*time.Second))
 }

@@ -27,33 +27,74 @@ type Client struct {
 	base  string
 	token TokenProvider
 	httpc *http.Client
-	log   *zap.Logger
+	// quick is the client for the first try of a quick call: it gives up when the
+	// answer has not begun within the first-attempt wait, so the retry comes sooner.
+	quick *http.Client
+	// firstWait is how long that first try waits.
+	firstWait time.Duration
+	log       *zap.Logger
+}
+
+// attemptLimit is the most one SignAPI call may take.
+const attemptLimit = 30 * time.Second
+
+// DefaultFirstAttempt is how long the first try of a quick call waits for the
+// answer to begin. The provider sometimes holds a request without answering at
+// all and answers the next one at once, so a short first wait loses nothing.
+const DefaultFirstAttempt = 10 * time.Second
+
+// Option configures a Client.
+type Option func(*Client)
+
+// WithFirstAttempt sets how long the first try of a quick call (session start and
+// close, CalculateDigest, list, download) waits for the answer to begin before it
+// is retried. A value of zero or less keeps the default.
+func WithFirstAttempt(d time.Duration) Option {
+	return func(c *Client) {
+		if d > 0 {
+			c.firstWait = d
+		}
+	}
 }
 
 // New builds a SignAPI client for baseURL (e.g. https://eparaksts-dev.zzdats.lv).
 // log may be nil; at debug level it logs each call's request/response (bodies are
 // digests/sessionIds/containers — never tokens; the Bearer header is not logged).
-func New(baseURL string, token TokenProvider, log *zap.Logger) *Client {
+func New(baseURL string, token TokenProvider, log *zap.Logger, opts ...Option) *Client {
 	if log == nil {
 		log = zap.NewNop()
 	}
-	return &Client{
+	c := &Client{
 		base:  strings.TrimSuffix(baseURL, "/"),
 		token: token,
 		// External authority (eParaksts SignAPI): transport otel-instrumented for
 		// client spans; the correlation id is intentionally NOT propagated — a
 		// foreign authority ignores it — so this stays a bespoke client, not the
 		// context-bound one our own service-to-service calls use.
-		httpc: observability.InstrumentHTTPClient(&http.Client{Timeout: 30 * time.Second}),
-		log:   log,
+		httpc:     observability.InstrumentHTTPClient(&http.Client{Timeout: attemptLimit}),
+		firstWait: DefaultFirstAttempt,
+		log:       log,
 	}
+	for _, o := range opts {
+		o(c)
+	}
+	c.quick = quickClient(c.firstWait)
+	return c
+}
+
+// quickClient waits at most wait for the response headers, which bounds a request
+// the provider holds without answering but never an upload or a download in flight.
+func quickClient(wait time.Duration) *http.Client {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.ResponseHeaderTimeout = wait
+	return observability.InstrumentHTTPClient(&http.Client{Timeout: attemptLimit, Transport: t})
 }
 
 // StartSession creates a session and returns its id. One session = one signature
 // (= one result container); GET → 201.
 func (c *Client) StartSession(ctx context.Context, correlationID string) (string, error) {
 	var out startResponse
-	if err := c.do(ctx, http.MethodGet, "/api-session/v1.0/start", correlationID, nil, "", &out); err != nil {
+	if err := c.doQuick(ctx, http.MethodGet, "/api-session/v1.0/start", correlationID, nil, "", &out); err != nil {
 		return "", err
 	}
 	if out.Data.SessionID == "" {
@@ -113,7 +154,7 @@ func (c *Client) CalculateDigest(ctx context.Context, correlationID string, req 
 		return nil, err
 	}
 	var out calculateDigestResponse
-	if err := c.do(ctx, http.MethodPost, "/api-sign/v1.0/CalculateDigest", correlationID, b, "application/json", &out); err != nil {
+	if err := c.doQuick(ctx, http.MethodPost, "/api-sign/v1.0/CalculateDigest", correlationID, b, "application/json", &out); err != nil {
 		return nil, err
 	}
 	// Flatten: broadcast the shared summary/algorithm onto each session's result
@@ -177,7 +218,7 @@ func (c *Client) AddArchiveTimestamp(ctx context.Context, correlationID, session
 // List returns the files in a session (signed results + inner documents).
 func (c *Client) List(ctx context.Context, correlationID, sessionID string) ([]FileInfo, error) {
 	var out listResponse
-	if err := c.do(ctx, http.MethodGet, "/api-storage/v1.0/"+sessionID+"/list", correlationID, nil, "", &out); err != nil {
+	if err := c.doQuick(ctx, http.MethodGet, "/api-storage/v1.0/"+sessionID+"/list", correlationID, nil, "", &out); err != nil {
 		return nil, err
 	}
 	return out.Data, nil
@@ -196,7 +237,7 @@ func (c *Client) Download(ctx context.Context, correlationID, sessionID, fileID 
 
 // CloseSession closes a session (data minimization; sessions otherwise live 24h).
 func (c *Client) CloseSession(ctx context.Context, correlationID, sessionID string) error {
-	return c.do(ctx, http.MethodGet, "/api-session/v1.0/"+sessionID+"/close", correlationID, nil, "", nil)
+	return c.doQuick(ctx, http.MethodGet, "/api-session/v1.0/"+sessionID+"/close", correlationID, nil, "", nil)
 }
 
 // --- transport helpers -------------------------------------------------------
@@ -223,10 +264,29 @@ func (e *APIError) ClientError() bool { return e.Status >= 400 && e.Status < 500
 
 // do issues a request with up to two retries on 5xx (idempotent calls only).
 func (c *Client) do(ctx context.Context, method, path, correlationID string, body []byte, contentType string, out any) error {
+	return c.retried(ctx, false, method, path, correlationID, body, contentType, out)
+}
+
+// doQuick is do for a call that normally answers at once and is safe to repeat: its
+// first try gives up after the first-attempt wait for the answer to begin.
+func (c *Client) doQuick(ctx context.Context, method, path, correlationID string, body []byte, contentType string, out any) error {
+	return c.retried(ctx, true, method, path, correlationID, body, contentType, out)
+}
+
+// client is the HTTP client for one try: the quick one for the first try of a
+// quick call, the full-length one otherwise.
+func (c *Client) client(quick bool, attempt int) *http.Client {
+	if quick && attempt == 0 {
+		return c.quick
+	}
+	return c.httpc
+}
+
+func (c *Client) retried(ctx context.Context, quick bool, method, path, correlationID string, body []byte, contentType string, out any) error {
 	const maxAttempts = 3
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		status, respBody, err := c.send(ctx, method, path, correlationID, body, contentType)
+		status, respBody, err := c.send(ctx, c.client(quick, attempt), method, path, correlationID, body, contentType)
 		if err != nil {
 			lastErr = err
 		} else if status/100 == 5 {
@@ -250,7 +310,7 @@ func (c *Client) do(ctx context.Context, method, path, correlationID string, bod
 
 // doOnce issues a single request with no retry (finalize: at-most-once).
 func (c *Client) doOnce(ctx context.Context, method, path, correlationID string, body []byte, contentType string, out any) error {
-	status, respBody, err := c.send(ctx, method, path, correlationID, body, contentType)
+	status, respBody, err := c.send(ctx, c.httpc, method, path, correlationID, body, contentType)
 	if err != nil {
 		return err
 	}
@@ -263,12 +323,14 @@ func (c *Client) doOnce(ctx context.Context, method, path, correlationID string,
 	return nil
 }
 
-// raw returns the raw response body (for downloads), retrying 5xx.
+// raw returns the raw response body (for downloads), retrying 5xx. A download
+// is a quick call: its first try waits the first-attempt wait for the answer to
+// begin, and the transfer itself is bounded only by the full attempt limit.
 func (c *Client) raw(ctx context.Context, method, path, correlationID string) ([]byte, error) {
 	const maxAttempts = 3
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		status, respBody, err := c.send(ctx, method, path, correlationID, nil, "")
+		status, respBody, err := c.send(ctx, c.client(true, attempt), method, path, correlationID, nil, "")
 		if err != nil {
 			lastErr = err
 		} else if status/100 == 5 {
@@ -290,11 +352,13 @@ func (c *Client) raw(ctx context.Context, method, path, correlationID string) ([
 // getRetry issues a bodyless request, retrying 5xx, and returns the status code +
 // raw body for any definitive (non-5xx) response so the caller can relay both. Used
 // by Validate to pass the SignAPI report (or its error JSON) through verbatim.
+// Every try gets the full attempt limit: a long-term validation legitimately
+// computes for tens of seconds before it answers.
 func (c *Client) getRetry(ctx context.Context, method, path, correlationID string) (int, []byte, error) {
 	const maxAttempts = 3
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		status, respBody, err := c.send(ctx, method, path, correlationID, nil, "")
+		status, respBody, err := c.send(ctx, c.httpc, method, path, correlationID, nil, "")
 		if err != nil {
 			lastErr = err
 		} else if status/100 == 5 {
@@ -311,7 +375,7 @@ func (c *Client) getRetry(ctx context.Context, method, path, correlationID strin
 	return 0, nil, lastErr
 }
 
-func (c *Client) send(ctx context.Context, method, path, correlationID string, body []byte, contentType string) (int, []byte, error) {
+func (c *Client) send(ctx context.Context, hc *http.Client, method, path, correlationID string, body []byte, contentType string) (int, []byte, error) {
 	token, err := c.token(ctx)
 	if err != nil {
 		return 0, nil, fmt.Errorf("signapi: introspect token: %w", err)
@@ -354,7 +418,7 @@ func (c *Client) send(ctx context.Context, method, path, correlationID string, b
 		ce.Write(fields...)
 	}
 
-	resp, err := c.httpc.Do(req)
+	resp, err := hc.Do(req)
 	if err != nil {
 		c.log.Debug("signapi transport error", zap.String("method", method), zap.String("path", path), zap.Error(err))
 		return 0, nil, fmt.Errorf("signapi: %s %s: %w", method, path, err)

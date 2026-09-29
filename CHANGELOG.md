@@ -5,6 +5,19 @@ runs the service or integrates against it.
 
 ## v0.3.0
 
+### Changed — a SignAPI request the provider holds costs about ten seconds, and never holds an answer
+
+The provider sometimes holds a request without answering for 30 s or more and answers the next one at
+once. The first try of a quick call — session start and close, `CalculateDigest`, list, download — now
+gives up after **10 s** without an answer and asks again; before, every try waited 30 s. Set it with
+`SIGNAPI_FIRST_ATTEMPT_TIMEOUT`. Validation, uploads and digest uploads still wait the full 30 s: a
+long-term validation legitimately computes that long, and an upload adds to the session, so it is not
+repeated early.
+
+Closing a SignAPI session no longer holds anything back. A validation report and an archived document go
+back as soon as they are ready, a failed job's state is saved, and a deleted job is gone, before their
+sessions close; a close that fails leaves the session to expire on the provider's side.
+
 ### Added — the service says which signing flows it runs
 
 **`GET /api/v1/info` lists the signing flows this deployment runs**, so a caller can offer a person

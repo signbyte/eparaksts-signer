@@ -102,7 +102,7 @@ func (a *App) init() error {
 	// Upstream platform client + SignAPI client (SignAPI authenticates with the
 	// TrustedX introspect token).
 	a.entrust = entrust.New(cfg.EntrustConfig(), a.Log())
-	a.signapi = signapi.New(cfg.SignAPIBaseURL, a.entrust.IntrospectToken, a.Log())
+	a.signapi = signapi.New(cfg.SignAPIBaseURL, a.entrust.IntrospectToken, a.Log(), signapi.WithFirstAttempt(cfg.SignAPIFirstAttempt))
 
 	// Orchestrator + background signing worker.
 	a.orchestrator = signing.New(a.jobs, a.signapi, a.entrust, cfg.OrchestratorConfig(), a.Log())

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/go-quicktest/qt"
 	"go.uber.org/zap"
@@ -411,4 +412,121 @@ func TestResponseLoggingElidesBinaryDownloads(t *testing.T) {
 	}
 	qt.Check(t, qt.Equals(sawBinarySizeOnly, true)) // the asice download logged size only
 	qt.Check(t, qt.Equals(sawJSONBody, true))       // the JSON response still logged its body
+}
+
+// heldFirstTry answers every path, except that the first request to each path is
+// held without an answer until the client gives up on it. counts records the
+// requests per path.
+func heldFirstTry(counts map[string]*atomic.Int32, answer func(w http.ResponseWriter, path string)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		key := r.URL.Path
+		if strings.HasSuffix(key, "/validate") {
+			key = "validate"
+		}
+		n := counts[key].Add(1)
+		if n == 1 {
+			// The server notices the client hanging up only once the body is read.
+			_, _ = io.Copy(io.Discard, r.Body)
+			select {
+			case <-r.Context().Done():
+			case <-time.After(5 * time.Second):
+			}
+			return
+		}
+		answer(w, key)
+	}
+}
+
+// TestQuickCallsRetryAHeldFirstTry: the provider sometimes holds a request without
+// answering and answers the next at once. A quick call gives up on its first try
+// after the first-attempt wait and asks again, instead of waiting out the full
+// attempt limit.
+func TestQuickCallsRetryAHeldFirstTry(t *testing.T) {
+	calls := map[string]func(c *Client) error{
+		"/api-session/v1.0/start": func(c *Client) error { _, err := c.StartSession(context.Background(), "corr"); return err },
+		"/api-session/v1.0/s1/close": func(c *Client) error {
+			return c.CloseSession(context.Background(), "corr", "s1")
+		},
+		"/api-storage/v1.0/s1/list": func(c *Client) error { _, err := c.List(context.Background(), "corr", "s1"); return err },
+		"/api-sign/v1.0/CalculateDigest": func(c *Client) error {
+			_, err := c.CalculateDigest(context.Background(), "corr", CalculateDigestRequest{})
+			return err
+		},
+		"/api-storage/v1.0/s1/f1": func(c *Client) error {
+			_, err := c.Download(context.Background(), "corr", "s1", "f1", false)
+			return err
+		},
+	}
+	for path, call := range calls {
+		t.Run(path, func(t *testing.T) {
+			counts := map[string]*atomic.Int32{path: {}}
+			srv := httptest.NewServer(heldFirstTry(counts, func(w http.ResponseWriter, p string) {
+				switch {
+				case strings.HasSuffix(p, "/start"):
+					_, _ = io.WriteString(w, `{"data":{"sessionId":"s1"}}`)
+				case strings.HasSuffix(p, "/list"):
+					_, _ = io.WriteString(w, `{"data":[{"id":"f1"}]}`)
+				case strings.HasSuffix(p, "/CalculateDigest"):
+					_, _ = io.WriteString(w, `{"data":{"sessionDigests":[]}}`)
+				default:
+					w.WriteHeader(http.StatusOK)
+				}
+			}))
+			t.Cleanup(srv.Close)
+			c := New(srv.URL, func(context.Context) (string, error) { return testToken, nil }, zap.NewNop(), WithFirstAttempt(100*time.Millisecond))
+
+			start := time.Now()
+			qt.Assert(t, qt.IsNil(call(c)))
+			qt.Check(t, qt.Equals(counts[path].Load(), int32(2)))
+			qt.Check(t, qt.IsTrue(time.Since(start) < 5*time.Second), qt.Commentf("took %s", time.Since(start)))
+		})
+	}
+}
+
+// TestFullCallsWaitThroughASlowAnswer: an upload, a digest upload and a validation
+// are not quick. Each may take longer than the first-attempt wait to answer, and
+// the upload and digest upload add to the session, so repeating them could add a
+// document twice. They wait the full attempt limit on their only try.
+func TestFullCallsWaitThroughASlowAnswer(t *testing.T) {
+	calls := map[string]func(c *Client) error{
+		"/api-storage/v1.0/s1/upload": func(c *Client) error {
+			_, err := c.UploadFile(context.Background(), "corr", "s1", "a.pdf", "application/pdf", []byte("PDF"))
+			return err
+		},
+		"/api-storage/v1.0/s1/addDocumentDigest": func(c *Client) error {
+			return c.AddDocumentDigest(context.Background(), "corr", "s1", []HashFile{{Name: "a.txt", Digest: "abc"}}, 0)
+		},
+		"validate": func(c *Client) error {
+			_, _, err := c.Validate(context.Background(), "corr", "s1", "d1")
+			return err
+		},
+	}
+	for path, call := range calls {
+		t.Run(path, func(t *testing.T) {
+			var n atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				n.Add(1)
+				time.Sleep(300 * time.Millisecond)
+				if strings.HasSuffix(r.URL.Path, "/upload") {
+					_, _ = io.WriteString(w, `{"data":{"id":"d1"}}`)
+					return
+				}
+				_, _ = io.WriteString(w, `{"data":{}}`)
+			}))
+			t.Cleanup(srv.Close)
+			c := New(srv.URL, func(context.Context) (string, error) { return testToken, nil }, zap.NewNop(), WithFirstAttempt(50*time.Millisecond))
+
+			qt.Assert(t, qt.IsNil(call(c)))
+			qt.Check(t, qt.Equals(n.Load(), int32(1)))
+		})
+	}
+}
+
+// TestFirstAttemptDefault: without the option, or with a value of zero, the first
+// try of a quick call waits the default ten seconds for the answer to begin.
+func TestFirstAttemptDefault(t *testing.T) {
+	tok := func(context.Context) (string, error) { return testToken, nil }
+	qt.Check(t, qt.Equals(New("http://signapi.test", tok, nil).firstWait, 10*time.Second))
+	qt.Check(t, qt.Equals(New("http://signapi.test", tok, nil, WithFirstAttempt(0)).firstWait, 10*time.Second))
+	qt.Check(t, qt.Equals(New("http://signapi.test", tok, nil, WithFirstAttempt(3*time.Second)).firstWait, 3*time.Second))
 }
