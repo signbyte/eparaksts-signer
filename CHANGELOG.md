@@ -20,6 +20,20 @@ GET /api/v1/info
              { "name": "eparakstsMobileEseal" }, { "name": "cscEidScan" }, { "name": "cscEidPlugin" } ] }
 ```
 
+### Changed — a CSC signing without the person's certificate is refused before it starts
+
+A CSC `prepare` that carries no `authCertificate` is now refused at once with
+`400 err:signing:missingAuthCertificate`, unless `TSA_ACCESS_CERT_FLOWS` names the flow (the deployment then
+requests the timestamp with its own certificate). Before, it was accepted, the person confirmed twice at the
+provider, and finalize refused it for the same reason at the very end. A CSC flow cannot supply the
+certificate itself: its signing credential is minted for the signing and requests no timestamp.
+
+```http
+POST /api/v1/signatures/prepare?flow=cscEidScan      (no authCertificate)
+
+400 { "code": "err:signing:missingAuthCertificate", … }
+```
+
 ### Changed — the CSC flow is two flows, and speaks the CSC API as the provider does
 
 **The `csc` flow is gone; there are two in its place, named for how the person's eID card is read:

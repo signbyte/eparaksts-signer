@@ -419,6 +419,10 @@ func (r *router) mapPrepareErr(ctx *azugo.Context, err error) {
 		ctx.Error(pkerrors.NewProblem("err:signing:invalidRequest",
 			pkerrors.WithStatus(fasthttp.StatusBadRequest),
 			pkerrors.WithDetail(err.Error())))
+	case errors.Is(err, signing.ErrNoTimestampCert):
+		ctx.Error(pkerrors.NewProblem("err:signing:missingAuthCertificate",
+			pkerrors.WithStatus(fasthttp.StatusBadRequest),
+			pkerrors.WithDetail(err.Error())))
 	case errors.Is(err, signing.ErrMixedFormat):
 		ctx.Error(pkerrors.NewProblem("err:signing:mixedFormat",
 			pkerrors.WithStatus(fasthttp.StatusBadRequest),

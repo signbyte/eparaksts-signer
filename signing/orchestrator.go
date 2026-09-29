@@ -148,6 +148,15 @@ func (o *Orchestrator) Prepare(ctx *azugo.Context, in PrepareInput) (*PrepareRes
 	if !o.Offered(in.Flow) {
 		return nil, ErrCSCNotEnabled
 	}
+	// A CSC signing's timestamp certificate can only come from the request (its
+	// signing credential is minted for the signing and cannot request one), so a
+	// request without one is refused now, before anything is uploaded and before the
+	// person is asked to confirm twice — finalize would refuse it only after both.
+	if in.Flow.IsCSC() {
+		if _, _, ok := o.authCertFor(&job.Job{Flow: in.Flow, AuthCert: in.AuthCert}); !ok {
+			return nil, ErrNoTimestampCert
+		}
+	}
 
 	j := &job.Job{
 		JobID:              ulid.Make().String(),
