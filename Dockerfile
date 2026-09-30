@@ -3,17 +3,21 @@ ARG GO_VERSION=1.27.0
 FROM golang:${GO_VERSION} AS build
 WORKDIR /src
 
-COPY . .
-
+# The module list alone, so an edit to the source reuses the downloaded modules.
+COPY go.mod go.sum ./
 # Every dependency is network-fetched at its pinned tag (no local replace, no
 # vendor directory), and all of them are public, so the builder needs no
 # credentials and no GOPRIVATE.
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
+
+COPY . .
 # VERSION is supplied by ci.yml (build-args) and reaches the binary through -X.
 # Without both halves the pipeline computes a version that is thrown away and
 # every log line reports the dev default instead of the build that is running.
 ARG VERSION=dev
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -X main.Version=${VERSION}" -o /out/server ./cmd/server
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -X main.Version=${VERSION}" -o /out/server ./cmd/server
 
 # Pre-create the eIDAS-audit durable-outbox spool dir (mode 0700) so it can be
 # COPYed into the runtime image owned by the nonroot user. A mounted empty named

@@ -17,7 +17,7 @@ import (
 
 // Validate uploads an already-signed document to a TRANSIENT SignAPI session and
 // returns the SignAPI validation report verbatim (upstream status + body), then
-// closes the session (data minimization). It works for self-contained documents,
+// closes the session (data minimization) once the report has been returned. It works for self-contained documents,
 // ASiC-E containers that embed their signed files (not hash-only/"fileless"), and
 // signed PDFs — anything whose signed content is present in the uploaded bytes.
 // The transient session id is returned alongside the report so the caller can
@@ -27,7 +27,7 @@ func (o *Orchestrator) Validate(ctx context.Context, correlationID, fileName, mi
 	if err != nil {
 		return "", 0, nil, fmt.Errorf("start session: %w", err)
 	}
-	defer o.closeSession(ctx, correlationID, sid)
+	defer o.closeLater(correlationID, sid)
 
 	up, err := o.signapi.UploadFile(ctx, correlationID, sid, fileName, mimeType, data)
 	if err != nil {
@@ -46,7 +46,7 @@ func (o *Orchestrator) Validate(ctx context.Context, correlationID, fileName, mi
 
 // ArchiveUpload uploads an already-signed document to a transient session, adds an
 // ARCHIVE_TIMESTAMP (B-LT → B-LTA), downloads the archived container, and closes
-// the session. authCert is the signed-in user's authentication certificate,
+// the session once the archived form has been returned. authCert is the signed-in user's authentication certificate,
 // supplied by the caller — a timestamp request is made in the acting user's
 // name, never a configured stand-in identity's, so there is no config
 // fallback; ErrNoAuthCert when absent.
@@ -60,7 +60,7 @@ func (o *Orchestrator) ArchiveUpload(ctx context.Context, correlationID, fileNam
 	if err != nil {
 		return nil, "", "", fmt.Errorf("start session: %w", err)
 	}
-	defer o.closeSession(ctx, correlationID, sid)
+	defer o.closeLater(correlationID, sid)
 
 	up, err := o.signapi.UploadFile(ctx, correlationID, sid, fileName, mimeType, data)
 	if err != nil {
@@ -91,7 +91,7 @@ func (o *Orchestrator) ArchiveUpload(ctx context.Context, correlationID, fileNam
 // ArchiveJobDocument adds an ARCHIVE_TIMESTAMP to a single READY document of an
 // existing job (B-LT → B-LTA, no re-upload) and returns the archived container
 // bytes. The auth certificate is the one captured on the job at signing time
-// (the signed-in user's auth cert; for csc, the flow's configured one) — no
+// (the signed-in user's auth cert, or the deployment's for the flows configured to use it) — no
 // config fallback here: the timestamp request is made in the signer's name.
 // ErrNoAuthCert when the job carries none. The job's SignAPI session is left
 // open (the job owns its lifecycle); the archived bytes are then also
@@ -129,13 +129,13 @@ func (o *Orchestrator) ArchiveJobDocument(ctx context.Context, jobID, documentID
 	return data, ct, outName, nil
 }
 
-// closeSession closes a single SignAPI session (best effort).
+// closeSession closes a single SignAPI session (best effort; closeLater runs it).
 func (o *Orchestrator) closeSession(ctx context.Context, correlationID, sessionID string) {
 	if sessionID == "" {
 		return
 	}
 	if err := o.signapi.CloseSession(ctx, correlationID, sessionID); err != nil {
-		o.log.Warn("close session failed", zap.String("session", sessionID), zap.Error(err))
+		o.log.Warn("close session failed", zap.String("session", sessionID), zap.String("correlation_id", correlationID), zap.Error(err))
 	}
 }
 

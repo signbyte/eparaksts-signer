@@ -38,6 +38,8 @@ github.com/gmb-lib/go-asice v1.6.2 h1:1RO5uFE255ziHK/yphrt73OL+BCzc8IaFYYxQloY+c
 github.com/gmb-lib/go-asice v1.6.2/go.mod h1:9mBNjV8tCnOwggbj582i+LDd0Vp7rJAGr4h8ZTJndtU=
 github.com/gmb-lib/go-authbyte v0.23.1 h1:wJlQbkJY9fDQOdWJviLx0XAvKI+OmsLR7vs+lZeo158=
 github.com/gmb-lib/go-authbyte v0.23.1/go.mod h1:hRgIYyht9dp5O9j1uKGCCeZd9EdRElAlM/ab0WwbW34=
+github.com/gmb-lib/go-csc v0.2.0 h1:uQG7xFXIwbTMCe5iUicFlaV9OupcSYP1pEHAcbGn1xo=
+github.com/gmb-lib/go-csc v0.2.0/go.mod h1:QvkhOLU/pgO/KnlJYn0BU2CSzEl1vtF6/Z7JqYP/xZo=
 github.com/gmb-lib/go-docgate v1.0.4 h1:Ww528MVkKhpVS5K2agI2oDJBJUqPuwst06Dt7w+uoSo=
 github.com/gmb-lib/go-docgate v1.0.4/go.mod h1:6Kc4mBz5HeswC+/MkBQGKL6ZEIQO29sSeLn8Wbif9AA=
 github.com/gmb-lib/go-eidas-audit v1.2.5 h1:BWz16YTF03E4Oo8/Z9RtWTsYXU8mOSHV0tzg51uwSjM=

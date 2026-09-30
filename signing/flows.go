@@ -2,8 +2,6 @@ package signing
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -39,99 +37,6 @@ func (f *eidFlow) AdvanceCallback(*azugo.Context, *job.Job, string) (string, boo
 
 func (f *eidFlow) Sign(context.Context, *job.Job) error {
 	return errors.New("signing: eid signatures are submitted by the client")
-}
-
-// ============================== csc (CSC layer) ==============================
-
-// cscFlow drives the new CSC API layer: oauth2code consent → credential token →
-// signHash. KNOWN parts are implemented; the open items (E/F/Cert/K) are marked
-// inline and resolved when the LVRTC platform update lands.
-type cscFlow struct{ o *Orchestrator }
-
-func (f *cscFlow) Type() job.Flow { return job.FlowCSC }
-
-func (f *cscFlow) Capabilities() Capabilities {
-	return Capabilities{SupportsBatch: true, Level: "QES"}
-}
-
-func (f *cscFlow) BeginAuthorization(ctx *azugo.Context, j *job.Job) (string, error) {
-	state, err := f.o.newState()
-	if err != nil {
-		return "", err
-	}
-	verifier, challenge, err := pkce()
-	if err != nil {
-		return "", err
-	}
-	j.OAuthState = state
-	j.PKCEVerifier = verifier
-	j.PendingLeg = job.LegCredential
-
-	// OPEN (item Cert): the `documentDigests` consent binding needs the digests
-	// up front, but the csc signing cert is only available after the credential
-	// token — so digests are computed in AdvanceCallback. The consent is issued
-	// without a pre-bound documentDigests until the platform sequencing is fixed.
-	return f.o.entrust.CSCAuthorizeURL(entrust.CSCAuthorizeParams{
-		State:         state,
-		CodeChallenge: challenge,
-		Scope:         "service",
-	}), nil
-}
-
-func (f *cscFlow) AdvanceCallback(ctx *azugo.Context, j *job.Job, code string) (string, bool, error) {
-	token, err := f.o.entrust.CSCExchange(ctx, code, j.PKCEVerifier)
-	if err != nil {
-		return "", false, err
-	}
-	j.SigningToken = token
-	j.PKCEVerifier = ""
-
-	credID := j.CredentialID
-	if credID == "" {
-		ids, err := f.o.entrust.CredentialsList(ctx, token)
-		if err != nil {
-			return "", false, err
-		}
-		if len(ids) == 0 {
-			return "", false, errors.New("signing: no csc credential available")
-		}
-		credID = ids[0]
-	}
-	cred, err := f.o.entrust.CredentialInfo(ctx, token, credID)
-	if err != nil {
-		return "", false, err
-	}
-	if len(cred.Cert.Certificates) == 0 {
-		return "", false, errors.New("signing: csc credential has no certificate")
-	}
-	j.CredentialID = credID
-	j.SigningCert = cred.Cert.Certificates[0]
-	j.SubjectRef = certSubject(j.SigningCert)
-
-	if err := f.o.calculateDigests(ctx, j, j.SigningCert); err != nil {
-		return "", false, err
-	}
-	return "", true, nil
-}
-
-func (f *cscFlow) Sign(ctx context.Context, j *job.Job) error {
-	hashes := make([]string, len(j.Documents))
-	for i := range j.Documents {
-		hashes[i] = j.Documents[i].Digest
-	}
-	// OPEN (item E): SAD / account_token sequencing is unconfirmed — passing the
-	// credential token as the Bearer with an empty SAD.
-	sigs, err := f.o.entrust.SignHash(ctx, j.SigningToken, j.CredentialID, "", j.SignAlgo, hashes)
-	if err != nil {
-		return err
-	}
-	if len(sigs) != len(j.Documents) {
-		return fmt.Errorf("signing: csc returned %d signatures for %d documents", len(sigs), len(j.Documents))
-	}
-	for i := range j.Documents {
-		j.Documents[i].SignatureValue = sigs[i]
-	}
-	return nil
 }
 
 // ============================ TrustedX flows ================================
@@ -418,16 +323,4 @@ func digestAlgoFor(digestB64 string) string {
 		}
 	}
 	return "sha256"
-}
-
-// pkce mints a PKCE verifier and its S256 challenge.
-func pkce() (verifier, challenge string, err error) {
-	b := make([]byte, 32)
-	if _, err := rand.Read(b); err != nil {
-		return "", "", err
-	}
-	verifier = base64.RawURLEncoding.EncodeToString(b)
-	sum := sha256.Sum256([]byte(verifier))
-	challenge = base64.RawURLEncoding.EncodeToString(sum[:])
-	return verifier, challenge, nil
 }

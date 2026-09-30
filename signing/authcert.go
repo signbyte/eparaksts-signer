@@ -30,9 +30,11 @@ import (
 // allFlows selects every signing flow.
 const allFlows = "all"
 
-// DefaultTSAAccessCertFlows is the shipped default — only the flow that has
-// never carried a signer certificate, so an existing deployment is unaffected.
-const DefaultTSAAccessCertFlows = string(job.FlowCSC)
+// DefaultTSAAccessCertFlows is the shipped default: no flow. Every flow, the CSC
+// ones included, finalizes with the signer's own authentication certificate,
+// captured at their login, so the timestamp is requested in their name. A
+// deployment that pays for its own timestamps lists the flows it pays for.
+const DefaultTSAAccessCertFlows = ""
 
 // FlowSet is the set of flows that finalize with the deployment's own
 // timestamping-access certificate.
@@ -96,13 +98,12 @@ func UnknownFlowNames(list string) []string {
 // KnownFlowNames lists every flow name a flow list may carry, so a report about
 // an unrecognized one can say what was expected.
 func KnownFlowNames() []string {
-	return []string{
-		string(job.FlowWebEID),
-		string(job.FlowEParakstsMobile),
-		string(job.FlowEIDScan),
-		string(job.FlowEParakstsMobileEseal),
-		string(job.FlowCSC),
+	flows := job.Flows()
+	names := make([]string, len(flows))
+	for i, f := range flows {
+		names[i] = string(f)
 	}
+	return names
 }
 
 // CertSource says whose certificate a timestamp was requested with. It is the

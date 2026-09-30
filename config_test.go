@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/go-quicktest/qt"
+	"github.com/spf13/viper"
 
 	"github.com/signbyte/eparaksts-signer/job"
 )
@@ -79,7 +80,7 @@ func TestOrchestratorConfigMapping(t *testing.T) {
 	qt.Check(t, qt.Equals(oc.EIDScanDeadline, 90*time.Second))
 	qt.Check(t, qt.Equals(oc.TSAAccessCert, "base64-cert"))
 	qt.Check(t, qt.IsTrue(oc.TSAAccessCertFlows.Has(job.FlowWebEID)))
-	qt.Check(t, qt.IsFalse(oc.TSAAccessCertFlows.Has(job.FlowCSC)))
+	qt.Check(t, qt.IsFalse(oc.TSAAccessCertFlows.Has(job.FlowCSCEidScan)))
 }
 
 // The deprecated spelling keeps working while it lives, and the new one wins.
@@ -102,4 +103,19 @@ func TestNewConfiguration(t *testing.T) {
 	c := NewConfiguration()
 	qt.Assert(t, qt.IsNotNil(c))
 	qt.Check(t, qt.IsNotNil(c.BaseConfiguration))
+}
+
+// The first-attempt wait of the quick SignAPI calls defaults to ten seconds and is
+// set with SIGNAPI_FIRST_ATTEMPT_TIMEOUT; the patient calls' limit defaults to sixty
+// and is set with SIGNAPI_CALL_TIMEOUT.
+func TestSignAPIWaitSettings(t *testing.T) {
+	v := viper.New()
+	NewConfiguration().Bind("", v)
+	qt.Check(t, qt.Equals(v.GetDuration("signapi_first_attempt"), 10*time.Second))
+	qt.Check(t, qt.Equals(v.GetDuration("signapi_call_timeout"), 60*time.Second))
+
+	t.Setenv("SIGNAPI_FIRST_ATTEMPT_TIMEOUT", "4s")
+	t.Setenv("SIGNAPI_CALL_TIMEOUT", "90s")
+	qt.Check(t, qt.Equals(v.GetDuration("signapi_first_attempt"), 4*time.Second))
+	qt.Check(t, qt.Equals(v.GetDuration("signapi_call_timeout"), 90*time.Second))
 }

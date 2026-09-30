@@ -3,11 +3,10 @@
 //
 // - the existing TrustedX surface (eParaksts Mobile, eID-scan, cloud eSeal):
 // OAuth two-redirect dance, users/me + sign_identities, server/raw + device/raw;
-// - the new CSC API layer (csc flow): info / oauth2code / credentials / signHash.
+// - the CSC API layer (csc flow), through the CSC client library (entrust/csc.go).
 //
 // Plus the process-wide TrustedX introspect token (client-credentials, 600 s)
-// that authenticates every SignAPI call. The TrustedX surface is verified against
-// manual traces; some CSC-layer behaviours remain blocked on the platform update.
+// that authenticates every SignAPI call.
 //
 // All HTTP uses an otel-instrumented transport so the calls to the QTSP show as
 // client spans (go-platform-kit observability; no-op when tracing is inert).
@@ -47,7 +46,7 @@ type Config struct {
 	ACREIDScan    string
 	ACRCloudEseal string
 
-	// CSC API layer (may share BaseURL; partly open).
+	// CSC API layer (the TrustedX host when CSCBaseURL is unset).
 	CSCBaseURL      string
 	CSCClientID     string
 	CSCClientSecret string

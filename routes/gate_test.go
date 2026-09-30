@@ -216,7 +216,7 @@ func TestPrepareGateSigningMode(t *testing.T) {
 	// about its content dies at the gate with the typed reason. A ".pdf" that
 	// carries no PDF magic is the honest-extension rule that signing mode keeps.
 	body, ct := prepareMultipart(t, "fake.pdf", []byte{0xde, 0xad})
-	resp, err := tc.Post("/api/v1/signatures/prepare?flow=csc", body,
+	resp, err := tc.Post("/api/v1/signatures/prepare?flow=cscEidScan", body,
 		tc.WithHeader("X-Test-Scopes", "signatures:create"),
 		tc.WithHeader("Content-Type", ct))
 	qt.Assert(t, qt.IsNil(err))
@@ -231,7 +231,7 @@ func TestPrepareGateSigningMode(t *testing.T) {
 	// service — not this gate — is the authority on signability. It proceeds
 	// past the gate (whatever the flow does next, it is not the gate's 422).
 	body, ct = prepareMultipart(t, "broken.pdf", []byte("%PDF-1.4 then garbage"))
-	resp, err = tc.Post("/api/v1/signatures/prepare?flow=csc", body,
+	resp, err = tc.Post("/api/v1/signatures/prepare?flow=cscEidScan", body,
 		tc.WithHeader("X-Test-Scopes", "signatures:create"),
 		tc.WithHeader("Content-Type", ct))
 	qt.Assert(t, qt.IsNil(err))
@@ -241,7 +241,7 @@ func TestPrepareGateSigningMode(t *testing.T) {
 	// Any opaque format is admitted in signing mode — the request proceeds
 	// past the gate (whatever the flow does next, it is not the gate's 422).
 	body, ct = prepareMultipart(t, "notes.txt", []byte("hello"))
-	resp, err = tc.Post("/api/v1/signatures/prepare?flow=csc", body,
+	resp, err = tc.Post("/api/v1/signatures/prepare?flow=cscEidScan", body,
 		tc.WithHeader("X-Test-Scopes", "signatures:create"),
 		tc.WithHeader("Content-Type", ct))
 	qt.Assert(t, qt.IsNil(err))

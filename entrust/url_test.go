@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gmb-lib/go-csc/lvrtc"
 	"github.com/go-quicktest/qt"
 )
 
@@ -67,25 +68,6 @@ func TestSignAuthorizeURLServerVsDevice(t *testing.T) {
 	qt.Check(t, qt.Equals(q.Get("scope"), scopeUseDevice))
 }
 
-func TestCSCAuthorizeURL(t *testing.T) {
-	c := testClient()
-	base, q := parseQuery(t, c.CSCAuthorizeURL(CSCAuthorizeParams{
-		State: "S3", CodeChallenge: "chal", Scope: "service", DocumentDigests: "dd",
-	}))
-	qt.Check(t, qt.Equals(base, "https://csc"+cscPathOAuthAuthorize))
-	qt.Check(t, qt.Equals(q.Get("response_type"), "code"))
-	qt.Check(t, qt.Equals(q.Get("client_id"), "csc-cid"))
-	qt.Check(t, qt.Equals(q.Get("code_challenge"), "chal"))
-	qt.Check(t, qt.Equals(q.Get("code_challenge_method"), "S256"))
-	qt.Check(t, qt.Equals(q.Get("scope"), "service"))
-	qt.Check(t, qt.Equals(q.Get("documentDigests"), "dd"))
-
-	// documentDigests / scope omitted when empty.
-	_, q = parseQuery(t, c.CSCAuthorizeURL(CSCAuthorizeParams{State: "S3", CodeChallenge: "chal"}))
-	qt.Check(t, qt.IsFalse(q.Has("documentDigests")))
-	qt.Check(t, qt.IsFalse(q.Has("scope")))
-}
-
 func TestACRForFlow(t *testing.T) {
 	c := testClient()
 	qt.Check(t, qt.Equals(c.ACRForFlow(true, false), "acr-eidscan"))    // device → eidScan
@@ -100,12 +82,21 @@ func TestACRForFlow(t *testing.T) {
 func TestCSCEnabledAndBase(t *testing.T) {
 	enabled := testClient()
 	qt.Check(t, qt.IsTrue(enabled.CSCEnabled()))
-	qt.Check(t, qt.Equals(enabled.cscBase(), "https://csc"))
+	// A base without the specification's /csc/v2 suffix gets it.
+	qt.Check(t, qt.Equals(enabled.CSC().BaseURI, "https://csc/csc/v2"))
+
+	full := New(Config{CSCBaseURL: "https://eidas-demo.eparaksts.lv/trustedx-resources/csc/v2/", CSCClientID: "c"}, nil)
+	qt.Check(t, qt.Equals(full.CSC().BaseURI, "https://eidas-demo.eparaksts.lv/trustedx-resources/csc/v2"))
 
 	disabled := New(Config{BaseURL: "https://host"}, nil)
 	qt.Check(t, qt.IsFalse(disabled.CSCEnabled()))
-	// cscBase falls back to BaseURL when CSCBaseURL is unset.
-	qt.Check(t, qt.Equals(disabled.cscBase(), "https://host"))
+	// Without a CSC base, the CSC layer is the TrustedX host's.
+	qt.Check(t, qt.Equals(disabled.CSC().BaseURI, "https://host/trustedx-resources/csc/v2"))
+
+	// The eParaksts profile, and no redirect ever followed.
+	c := enabled.CSC()
+	qt.Check(t, qt.Equals(c.Profile.Name, lvrtc.Profile.Name))
+	qt.Check(t, qt.IsNotNil(c.HTTP.CheckRedirect))
 }
 
 // TestNewTrimsTrailingSlash confirms New() trims trailing slashes so endpoints

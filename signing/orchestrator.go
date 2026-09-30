@@ -8,9 +8,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"azugo.io/azugo"
+	"github.com/gmb-lib/go-csc/lvrtc"
 	"github.com/oklog/ulid/v2"
 	"go.uber.org/zap"
 
@@ -24,7 +26,7 @@ var (
 	ErrUnknownFlow    = errors.New("signing: unknown flow")
 	ErrNotClientFlow  = errors.New("signing: not a client-signature flow")
 	ErrWrongState     = errors.New("signing: job not in the expected state")
-	ErrCSCNotEnabled  = errors.New("signing: csc flow not enabled (blocked on the LVRTC platform update)")
+	ErrCSCNotEnabled  = errors.New("signing: csc flow not enabled (no CSC client configured)")
 	ErrBatchUnsupport = errors.New("signing: batch not supported for this flow")
 	ErrMixedFormat    = errors.New("signing: mixed-format batch not supported")
 	ErrNoAuthCert     = errors.New("signing: no auth certificate (supply the signed-in user's authCertificate)")
@@ -75,6 +77,8 @@ type Orchestrator struct {
 	cfg     Config
 	log     *zap.Logger
 	flows   map[job.Flow]Flow
+	// closing tracks the session closes still running after their caller answered.
+	closing sync.WaitGroup
 }
 
 // New builds the orchestrator and registers all flows.
@@ -91,7 +95,8 @@ func New(jobs *job.Store, sa *signapi.Client, ent *entrust.Client, cfg Config, l
 	o := &Orchestrator{jobs: jobs, signapi: sa, entrust: ent, cfg: cfg, log: log}
 	o.flows = map[job.Flow]Flow{
 		job.FlowWebEID:               &eidFlow{o: o},
-		job.FlowCSC:                  &cscFlow{o: o},
+		job.FlowCSCEidScan:           &cscFlow{o: o, flow: job.FlowCSCEidScan, eid: lvrtc.EIDScan},
+		job.FlowCSCEidPlugin:         &cscFlow{o: o, flow: job.FlowCSCEidPlugin, eid: lvrtc.CardOnComputer},
 		job.FlowEParakstsMobile:      &txFlow{o: o, variant: txMobile},
 		job.FlowEIDScan:              &txFlow{o: o, variant: txEIDScan},
 		job.FlowEParakstsMobileEseal: &txFlow{o: o, variant: txCloudEseal},
@@ -101,6 +106,32 @@ func New(jobs *job.Store, sa *signapi.Client, ent *entrust.Client, cfg Config, l
 
 // Flow returns the strategy for a flow value, or nil.
 func (o *Orchestrator) Flow(f job.Flow) Flow { return o.flows[f] }
+
+// Offered reports whether this deployment runs flow f. Every registered flow
+// runs wherever the service does — the signing API it depends on authenticates
+// with the same platform client the other remote flows use — except the CSC
+// flows, which need a CSC client of their own.
+func (o *Orchestrator) Offered(f job.Flow) bool {
+	if o.flows[f] == nil {
+		return false
+	}
+	if f.IsCSC() {
+		return o.entrust != nil && o.entrust.CSCEnabled()
+	}
+	return true
+}
+
+// OfferedFlows lists the flows this deployment runs, in the order a caller is
+// shown them. Prepare refuses exactly the flows missing from it.
+func (o *Orchestrator) OfferedFlows() []job.Flow {
+	var out []job.Flow
+	for _, f := range job.Flows() {
+		if o.Offered(f) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
 
 // Store exposes the job store (used by the worker + handlers).
 func (o *Orchestrator) Store() *job.Store { return o.jobs }
@@ -117,8 +148,17 @@ func (o *Orchestrator) Prepare(ctx *azugo.Context, in PrepareInput) (*PrepareRes
 	if err := validateBatch(in, caps); err != nil {
 		return nil, err
 	}
-	if in.Flow == job.FlowCSC && !o.entrust.CSCEnabled() {
+	if !o.Offered(in.Flow) {
 		return nil, ErrCSCNotEnabled
+	}
+	// A CSC signing's timestamp certificate can only come from the request (its
+	// signing credential is minted for the signing and cannot request one), so a
+	// request without one is refused now, before anything is uploaded and before the
+	// person is asked to confirm twice — finalize would refuse it only after both.
+	if in.Flow.IsCSC() {
+		if _, _, ok := o.authCertFor(&job.Job{Flow: in.Flow, AuthCert: in.AuthCert}); !ok {
+			return nil, ErrNoTimestampCert
+		}
 	}
 
 	j := &job.Job{
@@ -184,7 +224,14 @@ func (o *Orchestrator) Prepare(ctx *azugo.Context, in PrepareInput) (*PrepareRes
 		// (captured at their login); the flow then skips its own identity
 		// resolution. Only a complete set is taken — anything missing and the
 		// flow resolves identities itself, exactly as without a caller supply.
-		if in.SignIdentityID != "" && in.SigningCert != "" && in.AuthCert != "" {
+		//
+		// A CSC flow takes only the authentication certificate: its signing credential is
+		// minted for this signing, and the login's authentication certificate is what
+		// the timestamp can be requested with.
+		switch {
+		case in.Flow.IsCSC():
+			j.AuthCert = in.AuthCert
+		case in.SignIdentityID != "" && in.SigningCert != "" && in.AuthCert != "":
 			j.SignIdentityID = in.SignIdentityID
 			j.SigningCert = in.SigningCert
 			j.AuthCert = in.AuthCert
@@ -325,8 +372,8 @@ func (o *Orchestrator) RunJob(ctx context.Context, jobID string) {
 		if err := flow.Sign(ctx, j); err != nil {
 			o.log.Warn("worker: sign failed", zap.String("job", j.JobID), zap.Error(err))
 			j.Fail("signing:sign_failed", err.Error())
-			o.closeSessions(ctx, j)
 			_ = o.jobs.Save(ctx, j)
+			o.closeSessions(j)
 			return
 		}
 		j.Transition(job.StateFinalizing)
@@ -336,8 +383,8 @@ func (o *Orchestrator) RunJob(ctx context.Context, jobID string) {
 		if err := o.finalize(ctx, j); err != nil {
 			o.log.Warn("worker: finalize failed", zap.String("job", j.JobID), zap.Error(err))
 			j.Fail("signapi:finalize_failed", err.Error())
-			o.closeSessions(ctx, j)
 			_ = o.jobs.Save(ctx, j)
+			o.closeSessions(j)
 			return
 		}
 		_ = o.jobs.Save(ctx, j)
@@ -391,8 +438,11 @@ func (o *Orchestrator) DeleteJob(ctx context.Context, jobID string) error {
 	if err != nil {
 		return err
 	}
-	o.closeSessions(ctx, j)
-	return o.jobs.Delete(ctx, j)
+	if err := o.jobs.Delete(ctx, j); err != nil {
+		return err
+	}
+	o.closeSessions(j)
+	return nil
 }
 
 // --- shared spine ------------------------------------------------------------
@@ -563,17 +613,48 @@ func (o *Orchestrator) finalize(ctx context.Context, j *job.Job) error {
 	return nil
 }
 
-// closeSessions closes every SignAPI session (best effort).
-func (o *Orchestrator) closeSessions(ctx context.Context, j *job.Job) {
+// closeSessions closes every SignAPI session of the job, after its caller has
+// moved on (closeLater).
+func (o *Orchestrator) closeSessions(j *job.Job) {
+	sids := make([]string, 0, len(j.Documents))
 	for i := range j.Documents {
-		sid := j.Documents[i].SessionID
-		if sid == "" {
-			continue
-		}
-		if err := o.signapi.CloseSession(ctx, j.JobID, sid); err != nil {
-			o.log.Warn("close session failed", zap.String("job", j.JobID), zap.String("session", sid), zap.Error(err))
+		sids = append(sids, j.Documents[i].SessionID)
+	}
+	o.closeLater(j.JobID, sids...)
+}
+
+// sessionCloseLimit bounds the closes of one closeLater call, all their tries included.
+const sessionCloseLimit = 2 * time.Minute
+
+// closeLater closes SignAPI sessions in the background, so a close never holds back
+// the answer, the saved state or the next job before it. A close the provider
+// cannot serve answers an error only after about a minute; a close is best effort,
+// and a session left open expires on the provider's side after a day. The closes run on their own
+// context: the caller's request context is recycled the moment it answers.
+func (o *Orchestrator) closeLater(correlationID string, sessionIDs ...string) {
+	var sids []string
+	for _, sid := range sessionIDs {
+		if sid != "" {
+			sids = append(sids, sid)
 		}
 	}
+	if len(sids) == 0 {
+		return
+	}
+	o.closing.Add(1)
+	go func() {
+		defer o.closing.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), sessionCloseLimit)
+		defer cancel()
+		for _, sid := range sids {
+			o.closeSession(ctx, correlationID, sid)
+		}
+	}()
+}
+
+// WaitClosing waits for the background session closes to finish.
+func (o *Orchestrator) WaitClosing() {
+	o.closing.Wait()
 }
 
 // --- helpers -----------------------------------------------------------------

@@ -7,6 +7,7 @@ require (
 	azugo.io/core v0.38.1
 	github.com/VictoriaMetrics/metrics v1.44.0
 	github.com/gmb-lib/go-authbyte v0.23.1
+	github.com/gmb-lib/go-csc v0.2.0
 	github.com/gmb-lib/go-docgate v1.0.4
 	github.com/gmb-lib/go-eidas-audit v1.2.5
 	github.com/gmb-lib/go-gdpr-audit v1.1.5

@@ -28,15 +28,21 @@ const statusLongPollMax = 30
 
 // prepare — POST /api/v1/signatures/prepare?flow={flow}
 func (r *router) prepare(ctx *azugo.Context) {
-	flowStr := "csc"
-	if f := ctx.Query.StringOptional("flow"); f != nil && *f != "" {
+	// The flow is required: the platform has several ways to sign and none of them
+	// is a safe guess.
+	flowStr := ""
+	if f := ctx.Query.StringOptional("flow"); f != nil {
 		flowStr = *f
 	}
 	flow := job.Flow(flowStr)
 	if !flow.Valid() {
+		detail := "unknown flow: " + flowStr
+		if flowStr == "" {
+			detail = "flow is required"
+		}
 		ctx.Error(pkerrors.NewProblem("err:signing:invalidRequest",
 			pkerrors.WithStatus(fasthttp.StatusBadRequest),
-			pkerrors.WithDetail("unknown flow: "+flowStr)))
+			pkerrors.WithDetail(detail)))
 		return
 	}
 
@@ -411,6 +417,10 @@ func (r *router) mapPrepareErr(ctx *azugo.Context, err error) {
 			pkerrors.WithDetail(err.Error())))
 	case errors.Is(err, signing.ErrUnknownFlow):
 		ctx.Error(pkerrors.NewProblem("err:signing:invalidRequest",
+			pkerrors.WithStatus(fasthttp.StatusBadRequest),
+			pkerrors.WithDetail(err.Error())))
+	case errors.Is(err, signing.ErrNoTimestampCert):
+		ctx.Error(pkerrors.NewProblem("err:signing:missingAuthCertificate",
 			pkerrors.WithStatus(fasthttp.StatusBadRequest),
 			pkerrors.WithDetail(err.Error())))
 	case errors.Is(err, signing.ErrMixedFormat):

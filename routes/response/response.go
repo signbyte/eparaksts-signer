@@ -62,3 +62,16 @@ type Status struct {
 	Documents           []StatusDocument `json:"documents"`
 	UpdatedAt           string           `json:"updatedAt"`
 }
+
+// Info is the /info response: what this deployment offers.
+type Info struct {
+	// Flows are the signing flows this deployment runs, in display order. A flow
+	// missing here is refused by prepare.
+	Flows []InfoFlow `json:"flows"`
+}
+
+// InfoFlow is one signing flow a deployment runs.
+type InfoFlow struct {
+	// Name is the flow's `?flow=` value.
+	Name string `json:"name"`
+}

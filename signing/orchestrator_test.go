@@ -26,7 +26,10 @@ func newSpineOrchestrator(t *testing.T, h http.HandlerFunc) *Orchestrator {
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 	sa := signapi.New(srv.URL, func(context.Context) (string, error) { return "tok", nil }, zap.NewNop())
-	return &Orchestrator{signapi: sa, log: zap.NewNop()}
+	o := &Orchestrator{signapi: sa, log: zap.NewNop()}
+	// Runs before the server closes: the background session closes finish first.
+	t.Cleanup(o.WaitClosing)
+	return o
 }
 
 // TestCalculateDigestsEchoesOpaqueValues confirms the spine stores the SignAPI

@@ -6,9 +6,14 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/go-quicktest/qt"
+
+	"github.com/signbyte/eparaksts-signer/job"
 )
 
 // TestValidatePDF drives the validate spine for a PDF: it validates the uploaded
@@ -41,6 +46,7 @@ func TestValidatePDF(t *testing.T) {
 	qt.Check(t, qt.Equals(status, http.StatusOK))
 	qt.Check(t, qt.Equals(string(body), report))
 	qt.Check(t, qt.Equals(validatePath, "/api-validation/v2.0/s1/docX/validate"))
+	o.WaitClosing()
 	qt.Check(t, qt.IsTrue(closed))
 }
 
@@ -183,4 +189,87 @@ func TestArchiveContainerType(t *testing.T) {
 	ct, ext = archiveContainerType(false)
 	qt.Check(t, qt.Equals(ct, "application/vnd.etsi.asic-e+zip"))
 	qt.Check(t, qt.Equals(ext, ".edoc"))
+}
+
+// heldCloseSpine answers the validate and archive spine at once, except the session
+// close, which it holds until release is called. closes counts the closes.
+func heldCloseSpine(t *testing.T) (o *Orchestrator, closes *atomic.Int32, release func()) {
+	t.Helper()
+	held := make(chan struct{})
+	var once sync.Once
+	release = func() { once.Do(func() { close(held) }) }
+	closes = &atomic.Int32{}
+	o = newSpineOrchestrator(t, func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/start"):
+			_, _ = io.WriteString(w, `{"data":{"sessionId":"s1"}}`)
+		case strings.HasSuffix(r.URL.Path, "/upload"):
+			_, _ = io.WriteString(w, `{"data":{"id":"doc-1","includedDocuments":[]}}`)
+		case strings.HasSuffix(r.URL.Path, "/validate"):
+			_, _ = io.WriteString(w, `{"data":{}}`)
+		case r.URL.Path == "/api-sign/v1.0/addArchive":
+			w.WriteHeader(http.StatusOK)
+		case strings.HasSuffix(r.URL.Path, "/close"):
+			closes.Add(1)
+			<-held
+			w.WriteHeader(http.StatusOK)
+		default:
+			_, _ = w.Write([]byte("ARCHIVED"))
+		}
+	})
+	t.Cleanup(release) // runs before the orchestrator waits for its closes
+	return o, closes, release
+}
+
+// answersWithin runs call and fails the test if it has not returned within limit.
+func answersWithin(t *testing.T, limit time.Duration, what string, call func() error) {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() { done <- call() }()
+	select {
+	case err := <-done:
+		qt.Assert(t, qt.IsNil(err))
+	case <-time.After(limit):
+		t.Fatalf("%s waited for the session close", what)
+	}
+}
+
+// TestValidateAnswersWhileItsSessionCloseIsHeld: a close the provider cannot serve
+// answers only after about a minute. The report goes back at once; the close after.
+func TestValidateAnswersWhileItsSessionCloseIsHeld(t *testing.T) {
+	o, closes, release := heldCloseSpine(t)
+	answersWithin(t, 3*time.Second, "the validation report", func() error {
+		_, _, _, err := o.Validate(context.Background(), "corr", "signed.pdf", "application/pdf", []byte("PDF"))
+		return err
+	})
+	release()
+	o.WaitClosing()
+	qt.Check(t, qt.Equals(closes.Load(), int32(1)))
+}
+
+// TestArchiveAnswersWhileItsSessionCloseIsHeld: the archived form goes back at once.
+func TestArchiveAnswersWhileItsSessionCloseIsHeld(t *testing.T) {
+	o, closes, release := heldCloseSpine(t)
+	answersWithin(t, 3*time.Second, "the archived form", func() error {
+		_, _, _, err := o.ArchiveUpload(context.Background(), "corr", "signed.edoc", "", "USERCERT", []byte("EDOC"))
+		return err
+	})
+	release()
+	o.WaitClosing()
+	qt.Check(t, qt.Equals(closes.Load(), int32(1)))
+}
+
+// TestCloseSessionsDoesNotHoldItsCaller: a failed job's state is saved, and a
+// deleted job is gone, before its sessions close; the close of every session with an
+// id runs in the background.
+func TestCloseSessionsDoesNotHoldItsCaller(t *testing.T) {
+	o, closes, release := heldCloseSpine(t)
+	j := &job.Job{JobID: "j1", Documents: []job.Document{{SessionID: "s1"}, {SessionID: ""}, {SessionID: "s2"}}}
+	answersWithin(t, 3*time.Second, "closing a job's sessions", func() error {
+		o.closeSessions(j)
+		return nil
+	})
+	release()
+	o.WaitClosing()
+	qt.Check(t, qt.Equals(closes.Load(), int32(2)))
 }

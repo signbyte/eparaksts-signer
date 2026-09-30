@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"strings"
 	"testing"
 
 	"azugo.io/azugo"
@@ -58,4 +59,18 @@ func TestPrepareRejectsUnknownFlow(t *testing.T) {
 	qt.Assert(t, qt.IsNil(err))
 	qt.Check(t, qt.Equals(resp.StatusCode(), fasthttp.StatusBadRequest))
 	fasthttp.ReleaseResponse(resp)
+
+	// No flow at all is refused the same way, and says so: there is no default.
+	// The retired single CSC flow is an unknown flow like any other.
+	for q, want := range map[string]string{"": "flow is required", "?flow=csc": "unknown flow: csc"} {
+		resp, err := tc.Post("/api/v1/signatures/prepare"+q, []byte(`{"documents":[]}`),
+			tc.WithHeader("X-Test-Scopes", "signatures:create"),
+			tc.WithHeader("Content-Type", "application/json"),
+		)
+		qt.Assert(t, qt.IsNil(err))
+		qt.Check(t, qt.Equals(resp.StatusCode(), fasthttp.StatusBadRequest))
+		body, _ := resp.BodyUncompressed()
+		qt.Check(t, qt.IsTrue(strings.Contains(string(body), want)), qt.Commentf("%s: %s", q, body))
+		fasthttp.ReleaseResponse(resp)
+	}
 }

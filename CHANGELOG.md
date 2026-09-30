@@ -3,6 +3,94 @@
 Notable changes to this service, newest first, per release. This file is written for whoever
 runs the service or integrates against it.
 
+## v0.3.0
+
+### Changed — a SignAPI call is waited for or retried by what it does, and a close never holds an answer
+
+The provider serves every call synchronously and keeps working on a request its caller has given up on. So the
+calls now follow two rules:
+
+- **Quick calls** — session start and close, list, download — give up on a first try that has not begun to answer
+  within **10 s** and ask again. A session start the provider cannot serve answers an error only after about a minute
+  while the next one is served at once, and a quick call cut short leaves nothing behind. Set with
+  `SIGNAPI_FIRST_ATTEMPT_TIMEOUT`.
+- **Patient calls** — `CalculateDigest`, finalize, the archive timestamp, validation — wait up to **60 s** for their
+  own answer (`SIGNAPI_CALL_TIMEOUT`) and are never asked twice after a timeout: only a request the provider
+  certainly did not take (no connection made, or a `502`/`503`) is asked again, and finalize and the archive
+  timestamp never are. Before, `CalculateDigest` and validation were asked again after 30 s, which could leave the
+  provider preparing one session twice.
+
+Uploads and digest uploads keep their 30 s tries.
+
+Closing a SignAPI session no longer holds anything back. A validation report and an archived document go back as
+soon as they are ready, a failed job's state is saved, and a deleted job is gone, before their sessions close; a
+close that fails leaves the session to expire on the provider's side.
+
+### Added — the service says which signing flows it runs
+
+**`GET /api/v1/info` lists the signing flows this deployment runs**, so a caller can offer a person
+only those, instead of a method that would be refused. It takes the `signatures:read` scope. The two
+CSC flows appear only when a CSC client is configured; every other flow appears wherever the service
+runs. `prepare` refuses exactly the flows the list leaves out.
+
+```http
+GET /api/v1/info
+
+200 OK
+{ "flows": [ { "name": "webEid" }, { "name": "eparakstsMobile" }, { "name": "eidScan" },
+             { "name": "eparakstsMobileEseal" }, { "name": "cscEidScan" }, { "name": "cscEidPlugin" } ] }
+```
+
+### Changed — a CSC signing without the person's certificate is refused before it starts
+
+A CSC `prepare` that carries no `authCertificate` is now refused at once with
+`400 err:signing:missingAuthCertificate`, unless `TSA_ACCESS_CERT_FLOWS` names the flow (the deployment then
+requests the timestamp with its own certificate). Before, it was accepted, the person confirmed twice at the
+provider, and finalize refused it for the same reason at the very end. A CSC flow cannot supply the
+certificate itself: its signing credential is minted for the signing and requests no timestamp.
+
+```http
+POST /api/v1/signatures/prepare?flow=cscEidScan      (no authCertificate)
+
+400 { "code": "err:signing:missingAuthCertificate", … }
+```
+
+### Changed — the CSC flow is two flows, and speaks the CSC API as the provider does
+
+**The `csc` flow is gone; there are two in its place, named for how the person's eID card is read:
+`cscEidScan` (a phone reads it, with eID Scan) and `cscEidPlugin` (a card reader, through the provider's
+own browser extension).** A request naming `csc` is now refused as an unknown flow (`400`). Nothing
+running used it: it answered `501` until a CSC client was configured.
+
+Both flows run the provider's real sequence, rebuilt on the `go-csc` client library and its eParaksts
+profile: a **credential registration** that returns a short-term signing credential, then a **signature
+authorization bound to the exact digests**, each confirmed by the person in the browser, then `signHash`
+with that authorization's token. Before the person confirms, the credential must stay valid for two more
+minutes; before finalize, each returned value is verified against the credential's certificate; a refused
+`signHash` is not retried. The `signAlgo` sent is an OID chosen from the credential's own key algorithms,
+never the signing API's algorithm name. The previous flow could not complete against a CSC-conformant
+service.
+
+What an operator and a caller see:
+
+- **`?flow=` is required on `prepare`.** It used to fall back to `csc`; a request without it is now
+  `400` with *flow is required*.
+- **`TSA_ACCESS_CERT_FLOWS` defaults to no flow** (was `csc`): every flow, the CSC ones included, requests the
+  timestamp with the signer's own authentication certificate, the one captured at their login. A deployment that
+  pays for its own timestamps lists the flows it pays for. One that set `TSA_ACCESS_CERT_FLOWS=csc` explicitly must
+  rename it; the old name is reported at startup and selects nothing.
+- `CSC_BASE_URL` may be the provider's full CSC base (ending `/csc/v2`) or the part before it; unset, the
+  CSC layer is the TrustedX host's `/trustedx-resources/csc/v2`.
+- A CSC `prepare` takes the person's **login authentication certificate** alone (`authCertificate`); it is
+  what the timestamp is requested with unless `TSA_ACCESS_CERT_FLOWS` names the flow.
+- New failure reasons on a CSC job: the short-term certificate expires too soon to finish, the signature
+  authorization is not for these documents, a returned signature does not verify.
+
+```http
+POST /api/v1/signatures/prepare?flow=cscEidScan
+{ "authCertificate": "MIIE…", "documents": [ … ] }
+```
+
 ## v0.2.0
 
 ### Added — choose whose certificate requests the timestamp, per signing flow
