@@ -1,6 +1,6 @@
 module github.com/signbyte/eparaksts-signer
 
-go 1.27.2
+go 1.27.3
 
 require (
 	azugo.io/azugo v0.40.0
