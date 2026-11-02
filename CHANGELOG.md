@@ -3,6 +3,24 @@
 Notable changes to this service, newest first, per release. This file is written for whoever
 runs the service or integrates against it.
 
+## v0.3.2
+
+A security release. **The service now builds with Go 1.27.3**, and its libraries move to their
+current releases. Nothing about the API, the configuration or the database changes.
+
+### Changed
+
+- **Go 1.27.3** (was 1.27.2), both in `go.mod` and as the image's default build toolchain
+  (`ARG GO_VERSION` in the `Dockerfile`). Go 1.27.3 fixes GO-2026-6809 in `crypto/x509`, which this
+  service's code reaches under 1.27.2; under 1.27.3 `govulncheck` finds none it calls. **Rebuild the
+  image to pick the fix up.**
+- **Libraries:** `go-authbyte` → v0.36.0 (from v0.29.1), `go-platform-kit` → v1.11.6,
+  `go-sec-events` → v1.2.3, `go-gdpr-audit` → v1.1.8, `go-eidas-audit` → v1.2.7, `go-docgate` →
+  v1.0.6, `go-csc` → v0.2.2, azugo → v0.41.0, `fasthttp` → v1.77.0, plus their indirect modules. The
+  go-authbyte releases in between change the sign-in client the web backends use and add an optional
+  second accepted audience (`AlsoAcceptedAudiences`, unset here); nothing this service configures
+  changes.
+
 ## v0.3.1
 
 A security release. **The service now builds with Go 1.27.2**, and its libraries move to their Go

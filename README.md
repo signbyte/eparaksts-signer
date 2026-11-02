@@ -172,7 +172,7 @@ sequenceDiagram
     participant SA as SignAPI
     participant CARD as browser + eID card
 
-    SF->>GO: POST /prepare?flow=webEid (DPoP; bytes + signing cert)
+    SF->>GO: POST /prepare?flow=webEid (DPoP, bytes + signing cert)
     GO->>SA: start session + upload (one session per document)
     GO->>SA: CalculateDigest (signing cert, signAsPdf / createNewEdoc)
     SA-->>GO: opaque digest(s) + signature_algorithm (SCAL2)
@@ -181,13 +181,13 @@ sequenceDiagram
 
     Note over CARD: card signs the digest (PIN) → raw P1363 r‖s
     SF->>GO: POST /{jobId}/signatures (base64 signature value)
-    GO->>GO: state → FINALIZING; enqueue background worker
+    GO->>GO: state → FINALIZING <br/> enqueue background worker
 
     Note over GO: background worker
     GO->>GO: NormalizeSignatureToDER — P1363 → DER (detect-and-convert)
     GO->>SA: finalizeSigning (DER signature + auth certificate)
     SA-->>GO: B-LT container produced
-    GO->>GO: clear transient signature value; state → READY
+    GO->>GO: clear transient signature value <br/> state → READY
 
     SF->>GO: GET /{jobId}/status?wait=… → READY
     SF->>GO: GET /{jobId}/documents/{documentId}
