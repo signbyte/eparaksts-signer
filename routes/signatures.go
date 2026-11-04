@@ -115,10 +115,10 @@ func (r *router) prepare(ctx *azugo.Context) {
 		}
 		in.Documents = append(in.Documents, doc)
 	}
-	if flow == job.FlowWebEID && in.SigningCert == "" {
+	if flow.IsClientSide() && in.SigningCert == "" {
 		ctx.Error(pkerrors.NewProblem("err:signing:invalidRequest",
 			pkerrors.WithStatus(fasthttp.StatusBadRequest),
-			pkerrors.WithDetail("signingCertificate is required for the webEid flow")))
+			pkerrors.WithDetail("signingCertificate is required for the "+string(flow)+" flow")))
 		return
 	}
 
@@ -135,7 +135,7 @@ func (r *router) prepare(ctx *azugo.Context) {
 	if res.AuthorizeURL != "" {
 		r.Audit().Redirect(ctx, j)
 	}
-	if flow == job.FlowWebEID && j.SubjectRef != "" {
+	if flow.IsClientSide() && j.SubjectRef != "" {
 		r.Audit().SignerAccessed(ctx, callerID(ctx), j.SubjectRef)
 	}
 	r.Audit().PrepareOutcome(ctx, callerID(ctx), true)
@@ -415,6 +415,10 @@ func (r *router) mapPrepareErr(ctx *azugo.Context, err error) {
 		ctx.Error(pkerrors.NewProblem("err:signing:cscNotEnabled",
 			pkerrors.WithStatus(fasthttp.StatusNotImplemented),
 			pkerrors.WithDetail(err.Error())))
+	case errors.Is(err, signing.ErrFlowNotOffered):
+		ctx.Error(pkerrors.NewProblem("err:signing:flowNotOffered",
+			pkerrors.WithStatus(fasthttp.StatusNotImplemented),
+			pkerrors.WithDetail(err.Error())))
 	case errors.Is(err, signing.ErrUnknownFlow):
 		ctx.Error(pkerrors.NewProblem("err:signing:invalidRequest",
 			pkerrors.WithStatus(fasthttp.StatusBadRequest),
@@ -452,6 +456,10 @@ func (r *router) mapJobErr(ctx *azugo.Context, err error) {
 	case errors.Is(err, signing.ErrNotClientFlow):
 		ctx.Error(pkerrors.NewProblem("err:signing:conflict",
 			pkerrors.WithDetail("this flow does not accept client signatures")))
+	case errors.Is(err, signing.ErrFlowNotOffered):
+		ctx.Error(pkerrors.NewProblem("err:signing:flowNotOffered",
+			pkerrors.WithStatus(fasthttp.StatusNotImplemented),
+			pkerrors.WithDetail(err.Error())))
 	case errors.Is(err, signing.ErrWrongState):
 		ctx.Error(pkerrors.NewProblem("err:signing:conflict",
 			pkerrors.WithDetail("job is not in the required state")))

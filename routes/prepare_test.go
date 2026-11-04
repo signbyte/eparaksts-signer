@@ -68,6 +68,41 @@ func TestPrepareEIDRequiresSigningCert(t *testing.T) {
 	qt.Check(t, qt.IsTrue(strings.Contains(string(buf), "signingCertificate")))
 }
 
+// legacyEidPrepareBody is a well-formed one-document hash-only card prepare.
+const legacyEidPrepareBody = `{"documents":[{"documentId":"d1","fileName":"f.txt","signatureFormat":"XAdES","documentHash":"aGk="}],` +
+	`"signingCertificate":"MIIsigning","authCertificate":"MIIauth"}`
+
+// Off (the default), legacyEid is refused as a flow this deployment does not run,
+// before anything reaches the signing API.
+func TestPrepareLegacyEIDRefusedWhenSwitchedOff(t *testing.T) {
+	resp := postPrepare(t, "signatures:create", "legacyEid", legacyEidPrepareBody)
+	defer fasthttp.ReleaseResponse(resp)
+	status, body := prepareCode(t, resp)
+	qt.Check(t, qt.Equals(status, fasthttp.StatusNotImplemented), qt.Commentf("%s", body))
+	qt.Check(t, qt.IsTrue(strings.Contains(body, "err:signing:flowNotOffered")), qt.Commentf("%s", body))
+}
+
+// On, legacyEid takes the webEid path: the card's signing certificate is
+// required, and with it the request gets past every gate to the signing API
+// (which this test app does not have).
+func TestPrepareLegacyEIDWhenSwitchedOn(t *testing.T) {
+	t.Setenv("LEGACY_EID_ENABLED", "true")
+
+	noCert := `{"documents":[{"documentId":"d1","fileName":"f.txt","signatureFormat":"XAdES","documentHash":"aGk="}]}`
+	resp := postPrepare(t, "signatures:create", "legacyEid", noCert)
+	status, body := prepareCode(t, resp)
+	fasthttp.ReleaseResponse(resp)
+	qt.Check(t, qt.Equals(status, fasthttp.StatusBadRequest), qt.Commentf("%s", body))
+	qt.Check(t, qt.IsTrue(strings.Contains(body, "signingCertificate is required for the legacyEid flow")), qt.Commentf("%s", body))
+
+	resp = postPrepare(t, "signatures:create", "legacyEid", legacyEidPrepareBody)
+	status, body = prepareCode(t, resp)
+	fasthttp.ReleaseResponse(resp)
+	qt.Check(t, qt.IsFalse(strings.Contains(body, "flowNotOffered")), qt.Commentf("%d %s", status, body))
+	qt.Check(t, qt.IsFalse(strings.Contains(body, "signingCertificate")), qt.Commentf("%d %s", status, body))
+	qt.Check(t, qt.Not(qt.Equals(status, fasthttp.StatusBadRequest)), qt.Commentf("%s", body))
+}
+
 // TestSubmitForbiddenWithoutWriteScope confirms the eid submit endpoint enforces
 // signatures:write.
 func TestSubmitForbiddenWithoutWriteScope(t *testing.T) {

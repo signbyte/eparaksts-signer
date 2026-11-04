@@ -15,13 +15,15 @@ import (
 
 // Flow is the signing flow selected by the inbound `?flow=` query parameter.
 // One platform, two surfaces: cscEidScan / cscEidPlugin ride the CSC API layer; eparakstsMobile/
-// eidScan/eparakstsMobileEseal ride the existing TrustedX surface; webEid is the
-// local card (client-side). Each token is identical to the auth login_method
-// that authorizes it, so a login and the signing it drives correlate by name.
+// eidScan/eparakstsMobileEseal ride the existing TrustedX surface; webEid and
+// legacyEid are the local card (client-side). Each token is identical to the auth
+// login_method that authorizes it, so a login and the signing it drives correlate
+// by name.
 type Flow string
 
 const (
 	FlowWebEID               Flow = "webEid"               // local eID card via Web eID, client-side signing
+	FlowLegacyEID            Flow = "legacyEid"            // local eID card via the provider's browser plugin, client-side signing
 	FlowEParakstsMobile      Flow = "eparakstsMobile"      // TrustedX · eParaksts Mobile · server/raw
 	FlowEIDScan              Flow = "eidScan"              // TrustedX · eID NFC · device/raw + poll
 	FlowEParakstsMobileEseal Flow = "eparakstsMobileEseal" // TrustedX · qualified eSeal · server/raw
@@ -36,17 +38,26 @@ func (f Flow) IsCSC() bool {
 	return f == FlowCSCEidScan || f == FlowCSCEidPlugin
 }
 
+// IsClientSide reports whether f signs with the local card in the person's
+// browser: the digests go to the caller and the signatures come back. The two
+// card flows differ only in the browser tool that reads the card.
+func (f Flow) IsClientSide() bool {
+	return f == FlowWebEID || f == FlowLegacyEID
+}
+
 // Flows lists every signing flow, in the order a caller is shown them.
 func Flows() []Flow {
 	return []Flow{
-		FlowWebEID, FlowEParakstsMobile, FlowEIDScan, FlowEParakstsMobileEseal, FlowCSCEidScan, FlowCSCEidPlugin,
+		FlowWebEID, FlowLegacyEID, FlowEParakstsMobile, FlowEIDScan, FlowEParakstsMobileEseal, FlowCSCEidScan,
+		FlowCSCEidPlugin,
 	}
 }
 
 // Valid reports whether f is a known flow.
 func (f Flow) Valid() bool {
 	switch f {
-	case FlowWebEID, FlowEParakstsMobile, FlowEIDScan, FlowEParakstsMobileEseal, FlowCSCEidScan, FlowCSCEidPlugin:
+	case FlowWebEID, FlowLegacyEID, FlowEParakstsMobile, FlowEIDScan, FlowEParakstsMobileEseal, FlowCSCEidScan,
+		FlowCSCEidPlugin:
 		return true
 	default:
 		return false

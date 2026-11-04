@@ -10,16 +10,39 @@ import (
 // TestFlowValid checks the known flows are accepted and everything else
 // (including case variants) is rejected.
 func TestFlowValid(t *testing.T) {
-	for _, f := range []Flow{FlowWebEID, FlowEParakstsMobile, FlowEIDScan, FlowEParakstsMobileEseal, FlowCSCEidScan, FlowCSCEidPlugin} {
+	for _, f := range []Flow{FlowWebEID, FlowLegacyEID, FlowEParakstsMobile, FlowEIDScan, FlowEParakstsMobileEseal, FlowCSCEidScan, FlowCSCEidPlugin} {
 		t.Run("valid/"+string(f), func(t *testing.T) {
 			qt.Check(t, qt.IsTrue(f.Valid()))
 		})
 	}
-	for _, f := range []Flow{"", "CSC", "eidscan", "EID", "bogus"} {
+	for _, f := range []Flow{"", "CSC", "eidscan", "EID", "bogus", "legacyEID", "legacy_eid"} {
 		t.Run("invalid/"+string(f), func(t *testing.T) {
 			qt.Check(t, qt.IsFalse(f.Valid()))
 		})
 	}
+}
+
+// TestFlowsListsEveryValidFlowOnce keeps the display list and Valid in step: a
+// flow added to one and not the other is either never shown or never accepted.
+// The two card flows sit side by side.
+func TestFlowsListsEveryValidFlowOnce(t *testing.T) {
+	seen := map[Flow]bool{}
+	for _, f := range Flows() {
+		qt.Check(t, qt.IsTrue(f.Valid()), qt.Commentf("%s", f))
+		qt.Check(t, qt.IsFalse(seen[f]), qt.Commentf("%s listed twice", f))
+		seen[f] = true
+	}
+	qt.Check(t, qt.Equals(len(seen), 7))
+	qt.Check(t, qt.DeepEquals(Flows()[:2], []Flow{FlowWebEID, FlowLegacyEID}))
+}
+
+// TestFlowIsClientSide: only the two card flows sign in the person's browser.
+func TestFlowIsClientSide(t *testing.T) {
+	for _, f := range Flows() {
+		want := f == FlowWebEID || f == FlowLegacyEID
+		qt.Check(t, qt.Equals(f.IsClientSide(), want), qt.Commentf("%s", f))
+	}
+	qt.Check(t, qt.IsFalse(Flow("bogus").IsClientSide()))
 }
 
 // TestStateTerminal checks only READY and FAILED are terminal.

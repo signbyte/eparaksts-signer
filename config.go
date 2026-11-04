@@ -97,6 +97,13 @@ type Configuration struct {
 	// unrecognized name is reported at startup and otherwise ignored.
 	TSAAccessCertFlows string `mapstructure:"tsa_access_cert_flows"`
 
+	// --- legacyEid ---
+
+	// LegacyEIDEnabled offers the legacyEid flow: the local eID card read by the
+	// provider's own browser plugin instead of Web eID, signed client-side like
+	// webEid. Off unless set; off, /info does not list it and prepare refuses it.
+	LegacyEIDEnabled bool `mapstructure:"legacy_eid_enabled"`
+
 	// Identity fetch retry (sign_identities materialize asynchronously).
 	IdentityFetchRetries int           `mapstructure:"tx_identity_fetch_retries"`
 	IdentityFetchDelay   time.Duration `mapstructure:"tx_identity_fetch_delay"`
@@ -177,6 +184,8 @@ func (c *Configuration) Bind(_ string, v *viper.Viper) {
 	v.SetDefault("tsa_access_cert_flows", signing.DefaultTSAAccessCertFlows)
 	_ = v.BindEnv("tsa_access_cert", "TSA_ACCESS_CERT")
 	_ = v.BindEnv("tsa_access_cert_flows", "TSA_ACCESS_CERT_FLOWS")
+	v.SetDefault("legacy_eid_enabled", false)
+	_ = v.BindEnv("legacy_eid_enabled", "LEGACY_EID_ENABLED")
 	_ = v.BindEnv("signapi_base_url", "SIGNAPI_BASE_URL")
 	v.SetDefault("signapi_first_attempt", signapi.DefaultFirstAttempt)
 	_ = v.BindEnv("signapi_first_attempt", "SIGNAPI_FIRST_ATTEMPT_TIMEOUT")
@@ -293,6 +302,7 @@ func (c *Configuration) OrchestratorConfig() signing.Config {
 		EIDScanDeadline:           c.EIDScanDeadline,
 		TSAAccessCert:             c.tsaAccessCert(),
 		TSAAccessCertFlows:        signing.ParseFlowSet(c.TSAAccessCertFlows),
+		LegacyEIDEnabled:          c.LegacyEIDEnabled,
 	}
 }
 
