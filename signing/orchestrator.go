@@ -30,6 +30,9 @@ var (
 	ErrBatchUnsupport = errors.New("signing: batch not supported for this flow")
 	ErrMixedFormat    = errors.New("signing: mixed-format batch not supported")
 	ErrNoAuthCert     = errors.New("signing: no auth certificate (supply the signed-in user's authCertificate)")
+	// ErrFlowNotOffered means this deployment does not run the flow: it is known,
+	// and switched off here (legacyEid without LEGACY_EID_ENABLED).
+	ErrFlowNotOffered = errors.New("signing: flow not offered by this deployment")
 	// ErrNoTimestampCert means nothing can request the timestamp for this
 	// signing: the request carried no authentication certificate, and this
 	// flow is not configured to use the deployment's own timestamping-access
@@ -67,6 +70,9 @@ type Config struct {
 	// TSAAccessCertFlows names the flows that finalize with TSAAccessCert
 	// rather than with the signer's own authentication certificate.
 	TSAAccessCertFlows FlowSet
+	// LegacyEIDEnabled offers the legacyEid flow: the local card read by the
+	// provider's own browser plugin instead of Web eID. Off unless set.
+	LegacyEIDEnabled bool
 }
 
 // Orchestrator runs the shared spine and dispatches to the SigningFlow seam.
@@ -94,7 +100,8 @@ func New(jobs *job.Store, sa *signapi.Client, ent *entrust.Client, cfg Config, l
 	}
 	o := &Orchestrator{jobs: jobs, signapi: sa, entrust: ent, cfg: cfg, log: log}
 	o.flows = map[job.Flow]Flow{
-		job.FlowWebEID:               &eidFlow{o: o},
+		job.FlowWebEID:               &eidFlow{o: o, flow: job.FlowWebEID},
+		job.FlowLegacyEID:            &eidFlow{o: o, flow: job.FlowLegacyEID},
 		job.FlowCSCEidScan:           &cscFlow{o: o, flow: job.FlowCSCEidScan, eid: lvrtc.EIDScan},
 		job.FlowCSCEidPlugin:         &cscFlow{o: o, flow: job.FlowCSCEidPlugin, eid: lvrtc.CardOnComputer},
 		job.FlowEParakstsMobile:      &txFlow{o: o, variant: txMobile},
@@ -110,13 +117,17 @@ func (o *Orchestrator) Flow(f job.Flow) Flow { return o.flows[f] }
 // Offered reports whether this deployment runs flow f. Every registered flow
 // runs wherever the service does — the signing API it depends on authenticates
 // with the same platform client the other remote flows use — except the CSC
-// flows, which need a CSC client of their own.
+// flows, which need a CSC client of their own, and legacyEid, which a deployment
+// switches on.
 func (o *Orchestrator) Offered(f job.Flow) bool {
 	if o.flows[f] == nil {
 		return false
 	}
 	if f.IsCSC() {
 		return o.entrust != nil && o.entrust.CSCEnabled()
+	}
+	if f == job.FlowLegacyEID {
+		return o.cfg.LegacyEIDEnabled
 	}
 	return true
 }
@@ -149,7 +160,10 @@ func (o *Orchestrator) Prepare(ctx *azugo.Context, in PrepareInput) (*PrepareRes
 		return nil, err
 	}
 	if !o.Offered(in.Flow) {
-		return nil, ErrCSCNotEnabled
+		if in.Flow.IsCSC() {
+			return nil, ErrCSCNotEnabled
+		}
+		return nil, ErrFlowNotOffered
 	}
 	// A CSC signing's timestamp certificate can only come from the request (its
 	// signing credential is minted for the signing and cannot request one), so a
@@ -320,6 +334,10 @@ func (o *Orchestrator) SubmitSignatures(ctx *azugo.Context, jobID string, sigs [
 	}
 	if o.flows[j.Flow] == nil || !o.flows[j.Flow].Capabilities().ClientSide {
 		return nil, ErrNotClientFlow
+	}
+	// A flow switched off since this job was prepared finishes nothing more.
+	if !o.Offered(j.Flow) {
+		return nil, ErrFlowNotOffered
 	}
 	if j.State != job.StateAwaitingClientSig {
 		return nil, ErrWrongState
@@ -590,7 +608,7 @@ func (o *Orchestrator) finalize(ctx context.Context, j *job.Job) error {
 			zap.String("input_encoding", inputEnc),
 			zap.String("input_signature_b64", input),
 			zap.String("der_signature_b64", der))
-		if wasP1363 && j.Flow != job.FlowWebEID {
+		if wasP1363 && !j.Flow.IsClientSide() {
 			// Encoding telemetry: a TrustedX/CSC response unexpectedly arrived as P1363.
 			o.log.Info("normalized P1363 signature from a non-eid flow",
 				zap.String("job", j.JobID), zap.String("flow", string(j.Flow)), zap.String("document", d.DocumentID))

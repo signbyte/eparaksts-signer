@@ -116,6 +116,14 @@ func TestCalculateDigestFormatOperationMatrix(t *testing.T) {
 // the transient signature values are cleared (data minimization). Reuses the
 // ECDSA vectors + helpers from ecdsa_test.go (same package).
 func TestFinalizeNormalizesToDER(t *testing.T) {
+	// Both card flows finalize the same way: the card's value may come in either
+	// encoding whichever browser tool read it.
+	for _, flow := range []job.Flow{job.FlowWebEID, job.FlowLegacyEID} {
+		t.Run(string(flow), func(t *testing.T) { finalizeNormalizesToDER(t, flow) })
+	}
+}
+
+func finalizeNormalizesToDER(t *testing.T, flow job.Flow) {
 	var fin signapi.FinalizeRequest
 	o := newSpineOrchestrator(t, func(w http.ResponseWriter, r *http.Request) {
 		qt.Check(t, qt.Equals(r.URL.Path, "/api-sign/v1.0/finalizeSigning"))
@@ -132,7 +140,7 @@ func TestFinalizeNormalizesToDER(t *testing.T) {
 
 	j := &job.Job{
 		JobID:    "j1",
-		Flow:     job.FlowWebEID,
+		Flow:     flow,
 		State:    job.StateFinalizing,
 		AuthCert: "AUTHCERT",
 		Documents: []job.Document{
@@ -186,6 +194,12 @@ func TestFinalizeNormalizesToDER(t *testing.T) {
 // TestFinalizeRejectsBadSignature confirms an unrecognized signature width is a
 // hard failure (never guessed) and the job is NOT marked ready.
 func TestFinalizeRejectsBadSignature(t *testing.T) {
+	for _, flow := range []job.Flow{job.FlowWebEID, job.FlowLegacyEID} {
+		t.Run(string(flow), func(t *testing.T) { finalizeRejectsBadSignature(t, flow) })
+	}
+}
+
+func finalizeRejectsBadSignature(t *testing.T, flow job.Flow) {
 	called := false
 	o := newSpineOrchestrator(t, func(w http.ResponseWriter, _ *http.Request) {
 		called = true
@@ -194,7 +208,7 @@ func TestFinalizeRejectsBadSignature(t *testing.T) {
 
 	bad := base64.StdEncoding.EncodeToString(make([]byte, 70)) // neither DER nor a P1363 width
 	j := &job.Job{
-		JobID: "j1", Flow: job.FlowWebEID, State: job.StateFinalizing, AuthCert: "A",
+		JobID: "j1", Flow: flow, State: job.StateFinalizing, AuthCert: "A",
 		Documents: []job.Document{{DocumentID: "d1", SessionID: "s1", SignatureValue: bad, State: job.DocPending, Format: job.FormatXAdES}},
 	}
 
@@ -203,6 +217,31 @@ func TestFinalizeRejectsBadSignature(t *testing.T) {
 	qt.Check(t, qt.IsTrue(errors.Is(err, ErrBadSignatureEncoding)))
 	qt.Check(t, qt.IsFalse(called))                      // never reached finalizeSigning
 	qt.Check(t, qt.Equals(j.State, job.StateFinalizing)) // not advanced to READY
+}
+
+// TestFinalizeRefusedBySignAPIIsNotReady: a well-formed signature that does not
+// match the digest is refused by the signing API at finalize; the card flows
+// pass the refusal up and never mark the job ready (the worker then fails it).
+func TestFinalizeRefusedBySignAPIIsNotReady(t *testing.T) {
+	for _, flow := range []job.Flow{job.FlowWebEID, job.FlowLegacyEID} {
+		t.Run(string(flow), func(t *testing.T) {
+			o := newSpineOrchestrator(t, func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = io.WriteString(w, `{"error":"signature does not match"}`)
+			})
+			sig := base64.StdEncoding.EncodeToString(derOf(t, big.NewInt(7), big.NewInt(9)))
+			j := &job.Job{
+				JobID: "j1", Flow: flow, State: job.StateFinalizing, AuthCert: "A",
+				Documents: []job.Document{{DocumentID: "d1", SessionID: "s1", SignatureValue: sig, State: job.DocPending, Format: job.FormatXAdES}},
+			}
+
+			err := o.finalize(context.Background(), j)
+			qt.Check(t, qt.IsNotNil(err))
+			qt.Check(t, qt.Not(qt.Equals(j.State, job.StateReady)))
+			qt.Check(t, qt.Not(qt.Equals(j.Documents[0].State, job.DocReady)))
+		})
+	}
 }
 
 // NOTE: validateBatch is already covered by TestValidateBatch in helpers_test.go

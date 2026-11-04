@@ -18,10 +18,14 @@ import (
 
 // eidFlow is the local eID card flow: digests are returned to the caller and the
 // signatures are submitted back. There is no
-// upstream authorization or signing call.
-type eidFlow struct{ o *Orchestrator }
+// upstream authorization or signing call. It runs under two names, webEid and
+// legacyEid, one per browser tool that reads the card; the signing is the same.
+type eidFlow struct {
+	o    *Orchestrator
+	flow job.Flow
+}
 
-func (f *eidFlow) Type() job.Flow { return job.FlowWebEID }
+func (f *eidFlow) Type() job.Flow { return f.flow }
 
 func (f *eidFlow) Capabilities() Capabilities {
 	return Capabilities{SupportsBatch: true, ClientSide: true, Level: "QES"}

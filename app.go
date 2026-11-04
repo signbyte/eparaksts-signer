@@ -212,6 +212,8 @@ func (a *App) init() error {
 	}
 
 	a.reportTimestampCertSettings()
+	a.Log().Info("legacyEid signing flow (the eID card through the provider's browser plugin)",
+		zap.Bool("enabled", a.config.LegacyEIDEnabled))
 
 	a.audit = audit.New(eidasEmitter, secEmitter, gc, psn, a.Log())
 

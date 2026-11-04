@@ -33,6 +33,21 @@ func TestParseFlowSetSelectsOnlyTheNamedFlows(t *testing.T) {
 	}
 }
 
+// TSA_ACCESS_CERT_FLOWS keeps a name only if it is a known flow, so legacyEid must
+// be one: otherwise the word is dropped quietly and its jobs finalize without the
+// deployment's certificate.
+func TestParseFlowSetKeepsLegacyEID(t *testing.T) {
+	set := ParseFlowSet("webEid,legacyEid")
+	for _, f := range []job.Flow{job.FlowWebEID, job.FlowLegacyEID} {
+		if !set.Has(f) {
+			t.Errorf("Has(%q) = false, want true", f)
+		}
+	}
+	if unknown := UnknownFlowNames("webEid,legacyEid"); len(unknown) != 0 {
+		t.Errorf("UnknownFlowNames = %v, want none", unknown)
+	}
+}
+
 func TestParseFlowSetAllSelectsEveryFlow(t *testing.T) {
 	set := ParseFlowSet("all")
 	for _, name := range KnownFlowNames() {

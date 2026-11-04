@@ -3,6 +3,32 @@
 Notable changes to this service, newest first, per release. This file is written for whoever
 runs the service or integrates against it.
 
+## v0.4.0
+
+A new signing flow, **`legacyEid`**, off unless a deployment switches it on. Nothing about the
+existing flows changes.
+
+### Added
+
+- **`legacyEid`: the local eID card read by the provider's own browser plugin** (eParakstītājs 3.0),
+  for deployments whose users have that plugin and not Web eID. It signs exactly as `webEid` does:
+  `prepare` returns the digests, the caller's page has the card sign them, the signatures come back
+  to `POST /api/v1/signatures/{jobId}/signatures`, and finalize normalizes either encoding (DER or
+  raw `r‖s`) to DER. Its `prepare` needs the card's `signingCertificate`, like `webEid`. Only the
+  name differs, so a sign-in through the plugin and the signing it drives correlate.
+- **`LEGACY_EID_ENABLED`** (default `false`). Set to `true`, `GET /api/v1/info` lists `legacyEid`
+  right after `webEid`:
+
+  ```json
+  {"flows":[{"name":"webEid"},{"name":"legacyEid"},{"name":"eparakstsMobile"}, …]}
+  ```
+
+  Unset, it is not listed, and `prepare?flow=legacyEid` answers `501` with the new code
+  `err:signing:flowNotOffered`, before anything is uploaded; a job prepared while it was on cannot have its
+  signatures submitted once it is off (the same `501`). The start log says whether it is on.
+- `TSA_ACCESS_CERT_FLOWS` accepts `legacyEid`; a deployment that lists `webEid` there will usually
+  list `legacyEid` too, since both finalize the same way.
+
 ## v0.3.2
 
 A security release. **The service now builds with Go 1.27.3**, and its libraries move to their

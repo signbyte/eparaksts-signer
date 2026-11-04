@@ -65,6 +65,15 @@ func TestInfoListsNoCSCFlowWithoutACSCClient(t *testing.T) {
 		[]string{"webEid", "eparakstsMobile", "eidScan", "eparakstsMobileEseal"}))
 }
 
+// LEGACY_EID_ENABLED adds legacyEid, right after webEid.
+func TestInfoListsLegacyEIDWhenSwitchedOn(t *testing.T) {
+	t.Setenv("LEGACY_EID_ENABLED", "true")
+	resp := getInfo(t, "signatures:read")
+	defer fasthttp.ReleaseResponse(resp)
+	qt.Check(t, qt.DeepEquals(infoFlows(t, resp),
+		[]string{"webEid", "legacyEid", "eparakstsMobile", "eidScan", "eparakstsMobileEseal"}))
+}
+
 // A configured CSC client adds both CSC flows.
 func TestInfoListsBothCSCFlowsWithACSCClient(t *testing.T) {
 	t.Setenv("CSC_CLIENT_ID", "the-csc-client")

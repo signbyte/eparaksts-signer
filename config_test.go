@@ -99,6 +99,20 @@ func TestTimestampCertificateSettingResolution(t *testing.T) {
 	qt.Check(t, qt.IsTrue(typo.OrchestratorConfig().TSAAccessCertFlows.Has(job.FlowWebEID)))
 }
 
+// legacyEid is off unless LEGACY_EID_ENABLED is set, and the setting reaches the
+// orchestrator.
+func TestLegacyEIDSetting(t *testing.T) {
+	v := viper.New()
+	NewConfiguration().Bind("", v)
+	qt.Check(t, qt.IsFalse(v.GetBool("legacy_eid_enabled")))
+
+	t.Setenv("LEGACY_EID_ENABLED", "true")
+	qt.Check(t, qt.IsTrue(v.GetBool("legacy_eid_enabled")))
+
+	qt.Check(t, qt.IsFalse((&Configuration{}).OrchestratorConfig().LegacyEIDEnabled))
+	qt.Check(t, qt.IsTrue((&Configuration{LegacyEIDEnabled: true}).OrchestratorConfig().LegacyEIDEnabled))
+}
+
 func TestNewConfiguration(t *testing.T) {
 	c := NewConfiguration()
 	qt.Assert(t, qt.IsNotNil(c))
