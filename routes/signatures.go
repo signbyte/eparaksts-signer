@@ -48,9 +48,7 @@ func (r *router) prepare(ctx *azugo.Context) {
 
 	meta, files, err := parsePrepare(ctx)
 	if err != nil {
-		ctx.Error(pkerrors.NewProblem("err:signing:invalidRequest",
-			pkerrors.WithStatus(fasthttp.StatusBadRequest),
-			pkerrors.WithDetail(err.Error())))
+		answerBadInput(ctx, err)
 		return
 	}
 
@@ -352,7 +350,10 @@ func parsePrepare(ctx *azugo.Context) (request.PrepareMetadata, map[string][]byt
 			if d.FileRef == "" {
 				continue
 			}
-			fh := ctx.Form.FileOptional(d.FileRef)
+			fh, err := ctx.Form.FileOptional(d.FileRef)
+			if err != nil {
+				return meta, nil, err
+			}
 			if fh == nil {
 				continue
 			}

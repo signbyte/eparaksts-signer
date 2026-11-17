@@ -24,16 +24,19 @@ import (
 func (r *router) archive(ctx *azugo.Context) {
 	fileName, mimeType, data, err := readSingleUpload(ctx)
 	if err != nil {
-		ctx.Error(pkerrors.NewProblem("err:signing:invalidRequest",
-			pkerrors.WithStatus(fasthttp.StatusBadRequest),
-			pkerrors.WithDetail(err.Error())))
+		answerBadInput(ctx, err)
 		return
 	}
 	if !r.gateUpload(ctx, docgate.ModeVerify, fileName, data) {
 		return
 	}
 	authCert := ""
-	if v := ctx.Form.StringOptional("authCertificate"); v != nil {
+	v, err := ctx.Form.StringOptional("authCertificate")
+	if err != nil {
+		ctx.Error(err)
+		return
+	}
+	if v != nil {
 		authCert = *v
 	}
 

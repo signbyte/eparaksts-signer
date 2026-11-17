@@ -23,9 +23,7 @@ import (
 func (r *router) validate(ctx *azugo.Context) {
 	fileName, mimeType, data, err := readSingleUpload(ctx)
 	if err != nil {
-		ctx.Error(pkerrors.NewProblem("err:signing:invalidRequest",
-			pkerrors.WithStatus(fasthttp.StatusBadRequest),
-			pkerrors.WithDetail(err.Error())))
+		answerBadInput(ctx, err)
 		return
 	}
 	if !r.gateUpload(ctx, docgate.ModeVerify, fileName, data) {
@@ -55,13 +53,33 @@ func (r *router) validate(ctx *azugo.Context) {
 	ctx.Raw(body)
 }
 
+// answerBadInput answers a request-reading failure. A body over the limit is
+// answered as the framework classifies it (413); anything else is a 400 in this
+// service's own problem shape.
+func answerBadInput(ctx *azugo.Context, err error) {
+	if errors.Is(err, azugo.RequestEntityTooLargeError{}) {
+		ctx.Error(err)
+		return
+	}
+	ctx.Error(pkerrors.NewProblem("err:signing:invalidRequest",
+		pkerrors.WithStatus(fasthttp.StatusBadRequest),
+		pkerrors.WithDetail(err.Error())))
+}
+
 // readSingleUpload reads the single `file` part from a multipart request, returning
 // its name, the part's declared content type, and its bytes.
 func readSingleUpload(ctx *azugo.Context) (fileName, mimeType string, data []byte, err error) {
 	if !strings.HasPrefix(ctx.Header.Get("Content-Type"), "multipart/") {
 		return "", "", nil, errors.New("multipart/form-data with a 'file' part is required")
 	}
-	fh := ctx.Form.FileOptional("file")
+	fh, err := ctx.Form.FileOptional("file")
+	if err != nil {
+		if errors.Is(err, azugo.RequestEntityTooLargeError{}) {
+			return "", "", nil, err
+		}
+		// An unparseable form carries no usable part.
+		return "", "", nil, errors.New("missing 'file' part")
+	}
 	if fh == nil {
 		return "", "", nil, errors.New("missing 'file' part")
 	}

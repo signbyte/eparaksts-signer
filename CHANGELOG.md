@@ -3,6 +3,17 @@
 Notable changes to this service, newest first, per release. This file is written for whoever
 runs the service or integrates against it.
 
+## v0.5.0
+
+### Changed
+
+- Runs on Go 1.27.4 and azugo v0.50.2.
+- **Request bodies are held to the server body limit:** a body over it answers `413` as a problem
+  document. The limit is `SERVER_MAX_REQUEST_BODY_SIZE`, which this service defaults to 64 MiB (the
+  framework's own default is 4 MiB); no route sets a different limit.
+- A malformed multipart body on `POST /api/v1/validations`, `/archive-timestamps` and
+  `/signatures/prepare` still answers `400` `err:signing:invalidRequest`.
+
 ## v0.4.0
 
 A new signing flow, **`legacyEid`**, off unless a deployment switches it on. Nothing about the
